@@ -11,6 +11,23 @@ class DMPRConfigDefaults(object):
     # things are different.
     RTN_MSG_HOLD_TIME = RTN_MSG_INTERVAL * 3 + 1
 
+    # default bandwidth for a given interface in bytes/second
+    # bytes/second enabled dmpr deployed in low bandwidth environments
+    # normally this value should be fetched from a interface information
+    # or by active measurements.
+    # Implementers SHOULD quantise values into a few classes to reduce the
+    # DMPR routing packet size.
+    # E.g. 1000, 5000, 10000, 100000, 1000000, 100000000, 100000000
+    LINK_CHARACTERISITCS_BANDWIDTH = 5000
+    # default loss is in percent for a given path
+    # Implementers SHOULD quantise values into a few classes to reduce the
+    # DMPR routing packet size.
+    # e.g. 0, 5, 10, 20, 40, 80
+    LINK_CHARACTERISITCS_LOSS = 0
+    # default link cost in a hypothetical currency, the higher the more valuable
+    # e.g. wifi can be 0, LTE can be 100, satelite uplink can be 1000
+    LINK_CHARACTERISITCS_COST = 0
+
     @staticmethod
     def get(name):
         return getattr(self, name)
@@ -53,6 +70,24 @@ class DMPR(object):
         if not isinstance(self.conf[cmd], str):
             msg = "id must be a string!"
             raise ConfigurationException(msg)
+        if not "interfaces" in self.configuration:
+            msg = "No interface configurated, need at least one"
+            raise ConfigurationException(msg)
+        self.conf["interfaces"] = self.configuration["interfaces"]
+        if not isinstance(self.conf["interfaces"], list):
+            msg = "interfaces must be a list!"
+            raise ConfigurationException(msg)
+        for interface_name, interface_data in self.conf["interfaces"].items():
+            if "name" not in interface_data:
+                msg = "interfaces entry must contain at least a \"name\""
+                raise ConfigurationException(msg)
+            if "link-characteristics" not in interface_data:
+                msg = "interfaces has no link characterstics, default some \"link-characteristics\""
+                self.log.warning(msg)
+                interface_data["link-characteristics"] = dict()
+                interface_data["link-characteristics"]["bandwidth"] = DMPRConfigDefaults.LINK_CHARACTERISITCS_BANDWIDTH
+                interface_data["link-characteristics"]["loss"] = DMPRConfigDefaults.LINK_CHARACTERISITCS_LOSS
+
         
 
     def stop(self):
@@ -70,9 +105,20 @@ class DMPR(object):
         self.stop()
         self.start()
 
-    def packet_rx(self, packet_payload):
+    def _is_valid_interface(self, interface_name):
+        if no interface_name in self.conf["interfaces"]:
+            return False
+        return True
+
+    def packet_rx(self, packet_payload, interface_name):
         """ receive routing packet in json encoded
              data format """
+        ok = self._is_valid_interface(interface_name)
+        if not ok:
+            msg  = "{} is not a configured, thus valid interface name, "
+            msg += "ignore packet for now"
+            self.log.error(msg.format(interface_name))
+            return
         pass
 
     def register_routing_table_update(self, function):
