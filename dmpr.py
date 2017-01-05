@@ -108,7 +108,7 @@ class DMPR(object):
                 raise ConfigurationException(msg)
             if "link-characteristics" not in interface_data:
                 msg = "interfaces has no link characterstics, default some \"link-characteristics\""
-                self.log.warning(msg)
+                self.log.warning(msg, time=self._get_time())
                 interface_data["link-characteristics"] = dict()
                 interface_data["link-characteristics"]["bandwidth"] = DMPRConfigDefaults.LINK_CHARACTERISITCS_BANDWIDTH
                 interface_data["link-characteristics"]["loss"] = DMPRConfigDefaults.LINK_CHARACTERISITCS_LOSS
@@ -150,7 +150,7 @@ class DMPR(object):
             for router_id, vv in v["rx-msg-db"].items():
                 if self._get_time() - vv["rx-time"] > self._conf["rtn_msg_hold_time"]:
                     msg = "outdated entry from {} received at {}, interface: {} - drop it"
-                    self._log(msg.format(router_id, vv["rx-time"], interface))
+                    self._log(msg.format(router_id, vv["rx-time"], interface), time=self._get_time())
                     dellist.append(router_id)
             for id_ in dellist:
                 route_recalc_required = True
@@ -223,13 +223,13 @@ class DMPR(object):
             # this function is also called in the
             # constructor, so do not print stop when
             # we never started
-            self.log("stop DMPR core")
+            self.log("stop DMPR core", time=self._get_time())
         self._routing_table = None
         self._next_tx_time = None
 
 
     def start(self, time):
-        self.log.info("start DMPR core")
+        self.log.info("start DMPR core", time=self._get_time())
         assert(time != None)
         self.set_time(time)
         assert(self._routing_table_update_func)
@@ -276,7 +276,7 @@ class DMPR(object):
         jitter = self._conf["rtn-msg-interval-jitter"]
         waittime = interval + random.randint(0, int(jitter))
         self._next_tx_time = self._get_time() + waittime
-        self.log.debug("schedule next transmission for {} seconds".format(self._next_tx_time))
+        self.log.debug("schedule next transmission for {} seconds".format(self._next_tx_time), time=self._get_time())
 
 
     def _is_valid_interface(self, interface_name):
@@ -291,7 +291,7 @@ class DMPR(object):
         if not ok:
             emsg  = "{} is not a configured, thus valid interface name, "
             emsg += "ignore packet for now"
-            self.log.error(emsg.format(interface_name))
+            self.log.error(emsg.format(interface_name), time=self._get_time())
         return ok
 
 
@@ -326,7 +326,7 @@ class DMPR(object):
              data format """
         ok = self._validate_rx_msg(msg, interface_name)
         if not ok:
-            self.log.warning("packet corrupt, dropping it")
+            self.log.warning("packet corrupt, dropping it", time=self._get_time())
             return
         route_recalc_required = self._rx_save_routing_data(msg, interface_name)
         if route_recalc_required:
@@ -362,7 +362,7 @@ class DMPR(object):
         return route_recalc_required
 
     def _recalculate_routing_table(self):
-        self.log.info("recalculate routing table")
+        self.log.info("recalculate routing table", time=self._get_time())
         # see _routing_table_update() this is how the routing
         # table should look like and saved under
         # self._routing_table
