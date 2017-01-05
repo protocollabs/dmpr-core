@@ -3,22 +3,22 @@ import uuid
 # example configuration for DMPR daemon
 exa_conf = """
     "id" : "ace80ef4-d284-11e6-bf26-cec0c932ce01",
-    "rtn_msg_interval" : "30",
-    "rtn_msg_interval_jitter" : "7",
-    "rtn_msg_hold_time" : "90",
-    "mcast_v4_tx_addr" : "224.0.1.1",
-    "mcast_v6_tx_addr" : "ff05:0:0:0:0:0:0:2",
-    "proto_transport_enable"  : [ "v4" ],
+    "rtn-msg-interval" : "30",
+    "rtn-msg-interval-jitter" : "7",
+    "rtn-msg-hold-time" : "90",
+    "mcast-v4-tx-addr" : "224.0.1.1",
+    "mcast-v6-tx-addr" : "ff05:0:0:0:0:0:0:2",
+    "proto-transport-enable"  : [ "v4" ],
     "interfaces" : [
       { "name" : "wlan0", "addr-v4" : "10.0.0.1", "link-characteristics" : { "bandwidth" : "100000", "loss" : "0"  } },
       { "name" : "tetra0", "addr-v4" : "10.0.0.1", "link-characteristics" : { "bandwidth" : "10000",  "loss" : "0"  } }
     ],
     "networks" : [
-       { "proto": "v4", "prefix" : "192.168.1.0", "prefix_len" : "24" },
-       { "proto": "v4", "prefix" : "192.168.2.0", "prefix_len" : "24" },
-       { "proto": "v4", "prefix" : "10.10.0.0",   "prefix_len" : "16" },
-       { "proto": "v6", "prefix" : "fdcb:523:1111::", "prefix_len" : "48" },
-       { "proto": "v6", "prefix" : "fd6a:6ad:b07f:ffff::", "prefix_len" : "64" }
+       { "proto": "v4", "prefix" : "192.168.1.0", "prefix-len" : "24" },
+       { "proto": "v4", "prefix" : "192.168.2.0", "prefix-len" : "24" },
+       { "proto": "v4", "prefix" : "10.10.0.0",   "prefix-len" : "16" },
+       { "proto": "v6", "prefix" : "fdcb:523:1111::", "prefix-len" : "48" },
+       { "proto": "v6", "prefix" : "fd6a:6ad:b07f:ffff::", "prefix-len" : "64" }
     }
 """
 
@@ -26,8 +26,8 @@ class ConfigurationException(Exception): pass
 
 class DMPRConfigDefaults(object):
     rtn_msg_interval = "30"
-    rtn_msg_interval_jitter = str(int(RTN_MSG_INTERVAL / 4))
-    rtn_msg_hold_time = str(RTN_MSG_INTERVAL * 3)
+    rtn_msg_interval_jitter = str(int(int(rtn_msg_interval) / 4))
+    rtn_msg_hold_time = str(int(rtn_msg_interval) * 3)
 
     # default bandwidth for a given interface in bytes/second
     # bytes/second enabled dmpr deployed in low bandwidth environments
@@ -46,17 +46,11 @@ class DMPRConfigDefaults(object):
     # e.g. wifi can be 0, LTE can be 100, satelite uplink can be 1000
     LINK_CHARACTERISITCS_COST = "0"
 
-    @staticmethod
-    def get(name):
-        return getattr(self, name)
-
-
-def id_generator:
-    return str(uuid.uuid1())
 
 class DMPR(object):
 
-    def __init__(self, log):
+    def __init__(self, log=None):
+        assert(log)
         self._conf = None
         self._time = None
         self.log = log
@@ -74,16 +68,16 @@ class DMPR(object):
             into internal configuration and check values """
         assert(configuration)
         self._conf = {}
-        cmd = "rtn_msg_interval"
-        self._conf[cmd] = configuration.get(cmd, DMPRConfigDefaults.get(cmd))
-        cmd = "rtn_msg_interval_jitter"
-        self._conf[cmd] = configuration.get(cmd, DMPRConfigDefaults.get(cmd))
-        cmd = "rtn_msg_hold_time"
-        self._conf[cmd] = configuration.get(cmd, DMPRConfigDefaults.get(cmd))
+        cmd = "rtn-msg-interval"
+        self._conf[cmd] = configuration.get(cmd, DMPRConfigDefaults.rtn_msg_interval)
+        cmd = "rtn-msg-interval-jitter"
+        self._conf[cmd] = configuration.get(cmd, DMPRConfigDefaults.rtn_msg_interval_jitter)
+        cmd = "rtn-msg-hold-time"
+        self._conf[cmd] = configuration.get(cmd, DMPRConfigDefaults.rtn_msg_hold_time)
         if "id" not in configuration:
-            msg = "configuration contains no id! A id must be unique, it can be
-                   randomly generated but for better performance and debugging
-                   capabilities this generated ID should be saved permanently
+            msg = "configuration contains no id! A id must be unique, it can be \
+                   randomly generated but for better performance and debugging \
+                   capabilities this generated ID should be saved permanently \
                    (e.g. at a local file) to survive daemon restarts"
             raise ConfigurationException(msg)
         if not isinstance(configuration["id"], str):
@@ -130,19 +124,19 @@ class DMPR(object):
                 if not "prefix" in network:
                     msg = "network must contain prefix key: {}".format(network)
                     raise ConfigurationException(msg)
-                if not "prefix_len" in network:
-                    msg = "network must contain prefix_len key: {}".format(network)
+                if not "prefix-len" in network:
+                    msg = "network must contain prefix-len key: {}".format(network)
                     raise ConfigurationException(msg)
             # seens fine, save it as it is
             self._conf["networks"] = configuration["networks"]
-        if "mcast_v4_tx_addr" in configuration:
-            msg = "no mcast_v4_tx_addr configured!"
+        if "mcast-v4-tx-addr" not in configuration:
+            msg = "no mcast-v4-tx-addr configured!"
             raise ConfigurationException(msg)
-        self._conf["mcast_v4_tx_addr"] = configuration["mcast_v4_tx_addr"]
-        if "mcast_v6_tx_addr" in configuration:
-            msg = "no mcast_v6_tx_addr configured!"
+        self._conf["mcast-v4-tx-addr"] = configuration["mcast-v4-tx-addr"]
+        if "mcast-v6-tx-addr" not in configuration:
+            msg = "no mcast-v6-tx-addr configured!"
             raise ConfigurationException(msg)
-        self._conf["mcast_v6_tx_addr"] = configuration["mcast_v6_tx_addr"]
+        self._conf["mcast-v6-tx-addr"] = configuration["mcast-v6-tx-addr"]
 
 
     def _check_outdated_route_entries(self):
@@ -215,7 +209,7 @@ class DMPR(object):
 
 
     def _set_time(self, time):
-        return self._time = time
+        self._time = time
 
 
     def stop(self, init=False):
@@ -259,7 +253,7 @@ class DMPR(object):
 
 
     def _sequence_no_inc(self, interface_name):
-        return self._rtd["interface"][interface_name]["sequence-no-tx"] += 1
+        self._rtd["interface"][interface_name]["sequence-no-tx"] += 1
 
 
     def _calc_next_tx_time(self):
