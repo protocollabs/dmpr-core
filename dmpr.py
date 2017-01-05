@@ -1,4 +1,6 @@
+import random
 import uuid
+
 
 # example configuration for DMPR daemon
 exa_conf = """
@@ -174,9 +176,9 @@ class DMPR(object):
     def tx_route_packet(self):
         # depending on local information the route
         # packets must be generated for each interface
-        for interface_name in self._rtd["interface"]:
+        for interface_name in self._rtd["interfaces"]:
             msg = self.create_routing_msg(interface_name)
-            v4_mcast_addr = self._conf["mcast_v4_tx_addr"]
+            v4_mcast_addr = self._conf["mcast-v4-tx-addr"]
             self._packet_tx_func(interface_name, "v4", v4_mcast_addr, msg)
 
 
@@ -191,7 +193,10 @@ class DMPR(object):
             not used in a absolute manner, depending on environment this
             can be a unix timestamp or starting at 0 in simulation
             environments """
-        self._set_time(time)
+        if not self._started:
+            # start() is not called, ignore this call
+            return
+        self.set_time(time)
         route_recalc_required = self._check_outdated_route_entries()
         if route_recalc_required:
             self._recalculate_routing_table()
@@ -208,11 +213,12 @@ class DMPR(object):
         return self._time
 
 
-    def _set_time(self, time):
+    def set_time(self, time):
         self._time = time
 
 
     def stop(self, init=False):
+        self._started = False
         if not init:
             # this function is also called in the
             # constructor, so do not print stop when
@@ -223,14 +229,16 @@ class DMPR(object):
 
 
     def start(self, time):
-        self.log("start DMPR core")
+        self.log.info("start DMPR core")
+        assert(time != None)
+        self.set_time(time)
         assert(self._routing_table_update_func)
         assert(self._packet_tx_func)
         assert(self._conf)
         assert(self._routing_table == None)
-        assert(self._time)
         self._init_runtime_data()
         self._calc_next_tx_time()
+        self._started = True
 
 
     def restart(self):
@@ -249,15 +257,15 @@ class DMPR(object):
 
 
     def _sequence_no(self, interface_name):
-        return self._rtd["interface"][interface_name]["sequence-no-tx"]
+        return self._rtd["interfaces"][interface_name]["sequence-no-tx"]
 
 
     def _sequence_no_inc(self, interface_name):
-        self._rtd["interface"][interface_name]["sequence-no-tx"] += 1
+        self._rtd["interfaces"][interface_name]["sequence-no-tx"] += 1
 
 
     def _calc_next_tx_time(self):
-        interval = self._conf["rtn_msg_interval"]
+        interval = int(self._conf["rtn-msg-interval"])
         if self._next_tx_time == None:
             # we start to the first time or after a
             # restart, so do not wait interval seconds, this
@@ -265,10 +273,10 @@ class DMPR(object):
             # as possible. But due to global synchronisation effects
             # we are kind and jitter at least some seconds
             interval = 0
-        jitter = self._conf["rtn_msg_interval_jitter"]
-        waittime = interval + random.randint(0, jitter)
+        jitter = self._conf["rtn-msg-interval-jitter"]
+        waittime = interval + random.randint(0, int(jitter))
         self._next_tx_time = self._get_time() + waittime
-        self.log.debug("schedule next transmission in {} seconds".format(waittime))
+        self.log.debug("schedule next transmission for {} seconds".format(self._next_tx_time))
 
 
     def _is_valid_interface(self, interface_name):
@@ -361,14 +369,14 @@ class DMPR(object):
 
 
 
-    def register_routing_table_update(self, function):
+    def register_routing_table_update_cb(self, function):
         self._routing_table_update_func = function
 
-    def register_packet_tx(self, function):
+    def register_msg_tx_cb(self, function):
         """ when a DMPR packet must be transmitted
-             the surrounding framework must register this
-             function. The prototype for the function should look like:
-             func(interface_name, proto, dst_mcast_addr, packet)
+        the surrounding framework must register this
+        function. The prototype for the function should look like:
+        func(interface_name, proto, dst_mcast_addr, packet)
         """
         self._packet_tx_func = function
 
