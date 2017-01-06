@@ -1,5 +1,6 @@
 import random
 import uuid
+import copy
 
 
 # example configuration for DMPR daemon
@@ -150,13 +151,14 @@ class DMPR(object):
             dellist = []
             # iterate over all neighbors
             for router_id, vv in v["rx-msg-db"].items():
-                if self._get_time() - vv["rx-time"] > self._conf["rtn_msg_hold_time"]:
+                if self._get_time() - vv["rx-time"] > int(self._conf["rtn-msg-hold-time"]):
                     msg = "outdated entry from {} received at {}, interface: {} - drop it"
-                    self._log(msg.format(router_id, vv["rx-time"], interface), time=self._get_time())
+                    self.log.debug(msg.format(router_id, vv["rx-time"], interface),
+                                   time=self._get_time())
                     dellist.append(router_id)
             for id_ in dellist:
                 route_recalc_required = True
-                del v[id_]
+                del v["rx-msg-db"][id_]
         return route_recalc_required
 
 
@@ -314,7 +316,8 @@ class DMPR(object):
         return self._cmp_dicts(p1, p2)
 
 
-    def packet_rx(self, msg, interface_name):
+    def msg_rx(self, interface_name, msg):
+        print(msg)
         """ receive routing packet in json encoded
              data format """
         ok = self._validate_rx_msg(msg, interface_name)
@@ -335,7 +338,7 @@ class DMPR(object):
             self._rtd["interfaces"][interface_name]["rx-msg-db"][sender_id] = dict()
         else:
             # existing entry from neighbor
-            last_msg = self._rtd["interfaces"][interface_name]["rx-msg-db"][sender_id]["pkt"]
+            last_msg = self._rtd["interfaces"][interface_name]["rx-msg-db"][sender_id]["msg"]
             seq_no_last = last_msg['sequence-no']
             seq_no_new  = msg['sequence-no']
             if seq_no_new <= seq_no_last:
@@ -349,9 +352,6 @@ class DMPR(object):
                 route_recalc_required = False
         self._rtd["interfaces"][interface_name]["rx-msg-db"][sender_id]['rx-time'] = self._get_time()
         self._rtd["interfaces"][interface_name]["rx-msg-db"][sender_id]['msg'] = msg
-
-        # for now recalculate route table at every received packet, later we
-        # will only recalculate when data has changed
         return route_recalc_required
 
 
