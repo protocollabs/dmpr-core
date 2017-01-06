@@ -58,12 +58,14 @@ class DMPR(object):
         self.log = log
         self.stop(init=True)
 
+
     def register_configuration(self, configuration):
         """ register and setup configuration. Raise
             an error when values are wrongly configured """
         assert(configuration)
         assert isinstance(configuration, dict)
         self.process_conf(configuration)
+
 
     def process_conf(self, configuration):
         """ convert external python dict configuration
@@ -183,7 +185,7 @@ class DMPR(object):
 
 
 
-    def tick(self, time):
+    def tick(self):
         """ this function is called every second, DMPR will
             implement his own timer/timeout related functionality
             based on this ticker. This is not the most efficient
@@ -196,7 +198,6 @@ class DMPR(object):
         if not self._started:
             # start() is not called, ignore this call
             return
-        self.set_time(time)
         route_recalc_required = self._check_outdated_route_entries()
         if route_recalc_required:
             self._recalculate_routing_table()
@@ -207,14 +208,6 @@ class DMPR(object):
             self.transmitted_now = True
         else:
             self.transmitted_now = False
-
-
-    def _get_time(self):
-        return self._time
-
-
-    def set_time(self, time):
-        self._time = time
 
 
     def stop(self, init=False):
@@ -228,10 +221,9 @@ class DMPR(object):
         self._next_tx_time = None
 
 
-    def start(self, time):
+    def start(self):
         self.log.info("start DMPR core", time=self._get_time())
-        assert(time != None)
-        self.set_time(time)
+        assert(self._get_time)
         assert(self._routing_table_update_func)
         assert(self._packet_tx_func)
         assert(self._conf)
@@ -285,6 +277,7 @@ class DMPR(object):
             if interface_name == interface["name"]:
                 found = True
         return found
+
 
     def _validate_rx_msg(self, msg, interface_name):
         ok = self._is_valid_interface(interface_name)
@@ -361,6 +354,7 @@ class DMPR(object):
         # will only recalculate when data has changed
         return route_recalc_required
 
+
     def _recalculate_routing_table(self):
         self.log.info("recalculate routing table", time=self._get_time())
         # see _routing_table_update() this is how the routing
@@ -368,9 +362,13 @@ class DMPR(object):
         # self._routing_table
 
 
+    def register_get_time_cb(self, function):
+        self._get_time = function
+
 
     def register_routing_table_update_cb(self, function):
         self._routing_table_update_func = function
+
 
     def register_msg_tx_cb(self, function):
         """ when a DMPR packet must be transmitted
@@ -379,6 +377,7 @@ class DMPR(object):
         func(interface_name, proto, dst_mcast_addr, packet)
         """
         self._packet_tx_func = function
+
 
     def _routing_table_update(self):
         """ return the calculated routing tables in the following form:
@@ -396,6 +395,7 @@ class DMPR(object):
              }
         """
         self._routing_table_update_func(self._routing_table)
+
 
     def _packet_tx(self, msg):
         self._packet_tx_func(msg)
