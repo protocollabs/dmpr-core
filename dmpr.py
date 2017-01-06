@@ -300,9 +300,15 @@ class DMPR(object):
         eq = True
         for key in dict1.keys():
             if type(dict1[key]) is dict:
-                eq = eq and compare_dictionaries(dict1[key],dict2[key])
+                if key not in dict2:
+                    return False
+                else:
+                    eq = eq and self._cmp_dicts(dict1[key], dict2[key])
             else:
-                eq = eq and (dict1[key] == dict2[key])
+                if key not in dict2:
+                    return False
+                else:
+                    eq = eq and (dict1[key] == dict2[key])
         return eq
 
 
