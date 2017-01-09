@@ -218,7 +218,7 @@ class DMPR(object):
             # this function is also called in the
             # constructor, so do not print stop when
             # we never started
-            self.log("stop DMPR core", time=self._get_time())
+            self.log.warning("stop DMPR core", time=self._get_time())
         self._routing_table = None
         self._next_tx_time = None
 
