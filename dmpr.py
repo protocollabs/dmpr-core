@@ -395,6 +395,22 @@ class DMPR(object):
         return route_recalc_required
 
 
+    def next_hop_addr(self, proto, router_id, iface_name):
+        """ return the IPv4/IPv6 address of the sender of an routing message """
+        if iface_name not in self._rtd["interfaces"]:
+            raise InternalException("interface not configured: {}".format(iface_name))
+        if router_id not in self._rtd["interfaces"][iface_name]:
+            self.log.warning("cannot calculate next_hop_addr because router id is not in "
+                             " databse (anymore!)? id:{}".format(router_id))
+            return None
+        msg = self._rtd["interfaces"][iface_name][router_id]['msg']
+        if proto == 'v4':
+            return msg['originator-addr-v4']
+        if proto == 'v6':
+            return msg['originator-addr-v6']
+        raise InternalException("only v4 or v6 supported: {}".format(proto))
+
+
     def _recalculate_routing_table(self):
         self.log.info("recalculate routing table", time=self._get_time())
         # see _routing_table_update() this is how the routing
