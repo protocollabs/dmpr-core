@@ -354,7 +354,6 @@ class DMPR(object):
 
 
     def msg_rx(self, interface_name, msg):
-        print(msg)
         """ receive routing packet in json encoded
              data format """
         rxmsg = "rx route packet from {}, interface:{}, seq-no:{}"
