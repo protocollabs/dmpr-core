@@ -26,6 +26,7 @@ exa_conf = """
 """
 
 class ConfigurationException(Exception): pass
+class InternalException(Exception): pass
 
 class DMPRConfigDefaults(object):
     rtn_msg_interval = "30"
@@ -162,6 +163,28 @@ class DMPR(object):
         return route_recalc_required
 
 
+    def conf_originator_addr_by_iface_v6(self, iface_name):
+        for iface_data in self._conf["interfaces"]:
+            if iface_data['name'] == iface_name:
+                return iface_data['addr-v6']
+        return None
+
+
+    def conf_originator_addr_by_iface_v4(self, iface_name):
+        for iface_data in self._conf["interfaces"]:
+            if iface_data['name'] == iface_name:
+                return iface_data['addr-v4']
+        return None
+
+
+    def conf_originator_addr_by_iface(self, proto, iface_name):
+        if proto == "v4":
+            return self.conf_originator_addr_by_iface_v4(iface_name)
+        if proto == "v6":
+            return self.conf_originator_addr_by_iface_v6(iface_name)
+        raise InternalException("v4 or v6 not something else")
+
+
     def create_routing_msg(self, interface_name):
         packet = dict()
         packet['id'] = self._conf["id"]
@@ -170,6 +193,7 @@ class DMPR(object):
         # ... and increment number locally
         self._sequence_no_inc(interface_name)
         packet['networks'] = list()
+        packet['originator-addr-v4'] = self.conf_originator_addr_by_iface("v4", interface_name)
         for network in self._conf["networks"]:
             if network["proto"] == "v4":
                 ipstr = "{}/{}".format(network["prefix"], network["prefix-len"])
