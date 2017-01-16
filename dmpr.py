@@ -395,7 +395,7 @@ class DMPR(object):
         return route_recalc_required
 
 
-    def next_hop_addr(self, proto, router_id, iface_name):
+    def next_hop_ip_addr(self, proto, router_id, iface_name):
         """ return the IPv4/IPv6 address of the sender of an routing message """
         if iface_name not in self._rtd["interfaces"]:
             raise InternalException("interface not configured: {}".format(iface_name))
