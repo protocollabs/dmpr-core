@@ -326,7 +326,15 @@ class DMPR(object):
             emsg += "ignore packet for now"
             now = self._get_time(priv_data=self._get_time_priv_data)
             self.log.error(emsg.format(interface_name), time=now)
-        return ok
+            return False
+        if msg['id'] == self._conf['id']:
+            emsg = "receive a message from ourself! id:{} == id:{}, ".format(msg['id'], self._conf['id'])
+            emsg += " This means a) configration error (same id, or look problem"
+            now = self._get_time(priv_data=self._get_time_priv_data)
+            self.log.error(emsg, time=now)
+            return False
+        return True
+
 
 
     # FIXME: search log for update here
