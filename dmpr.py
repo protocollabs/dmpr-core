@@ -389,7 +389,7 @@ class DMPR(object):
             seq_no_last = last_msg['sequence-no']
             seq_no_new  = msg['sequence-no']
             if seq_no_new <= seq_no_last:
-                print("receive duplicate or outdated route packet -> ignore it")
+                #print("receive duplicate or outdated route packet -> ignore it")
                 route_recalc_required = False
                 return route_recalc_required
             data_equal = self._cmp_packets(last_msg, msg)
