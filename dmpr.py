@@ -416,11 +416,11 @@ class DMPR(object):
         """ return the IPv4/IPv6 address of the sender of an routing message """
         if iface_name not in self._rtd["interfaces"]:
             raise InternalException("interface not configured: {}".format(iface_name))
-        if router_id not in self._rtd["interfaces"][iface_name]:
+        if router_id not in self._rtd["interfaces"][iface_name]['rx-msg-db']:
             self.log.warning("cannot calculate next_hop_addr because router id is not in "
                              " databse (anymore!)? id:{}".format(router_id))
             return None
-        msg = self._rtd["interfaces"][iface_name][router_id]['msg']
+        msg = self._rtd["interfaces"][iface_name]['rx-msg-db'][router_id]['msg']
         if proto == 'v4':
             return msg['originator-addr-v4']
         if proto == 'v6':
@@ -434,458 +434,458 @@ class DMPR(object):
         # see _routing_table_update() this is how the routing
         # table should look like and saved under
         # self._routing_table
-        loss_flag=True
-        bandwidth_flag=True
-        self._routing_table=dict()
-        #self._routing_table['lowest-loss']=list
-        self.neigh_routing_paths = dict()
-        self.neigh_routing_paths['neighs']=dict()
-        self.neigh_routing_paths['othernode_paths']=dict()
-        self.neigh_routing_paths['othernode_paths']['high_bandwidth']=dict()
-        self.neigh_routing_paths['othernode_paths']['low_loss']=dict()
-        self.compressedloss=dict()
-        self.compressedBW=dict()
+        loss_flag = True
+        bandwidth_flag = True
+        self._routing_table = dict()
+        neigh_routing_paths = dict()
         self.fib = dict()
         self.fib['low_loss'] = dict()
         self.fib['high_bandwidth'] = dict()
         self.fib['path_characteristics'] = dict()
-        self._calc_neigh_routing_paths()
+        neigh_routing_paths = self._calc_neigh_routing_paths(neigh_routing_paths)
         if loss_flag==True:
-           self._calc_fib_low_loss()
+           self._calc_fib_low_loss(neigh_routing_paths)
            self._calc_loss_routingtable()
         if bandwidth_flag==True:
-           self._calc_fib_high_bandwidth()
+           self._calc_fib_high_bandwidth(neigh_routing_paths)
            self._calc_bw_routingtable()
         self.log.debug(self.fib)
         self.log.debug(self._routing_table)
+        # routing table calculated, now inform our "parent"
+        # about the new routing table
+        self._routing_table_update()
 
 
-    def _calc_neigh_routing_paths(self):
-        for key_i,value_i in self._rtd["interfaces"].items():
-            for key_s,value_s_real in value_i["rx-msg-db"].items():
-                value_s=dict()
-                value_s=value_s_real.copy()
-                self._add_all_neighs(key_i,value_i,key_s,value_s_real)
-                if len(value_s['msg']['routingpaths'])>0:
-                   self._add_all_othernodes(key_s,value_s,key_i)
-        self.log.debug(self.neigh_routing_paths)
+    def _calc_neigh_routing_paths(self, neigh_routing_paths):
+        neigh_routing_paths['neighs'] = dict()
+        neigh_routing_paths['othernode_paths'] = dict()
+        neigh_routing_paths['othernode_paths']['high_bandwidth'] = dict()
+        neigh_routing_paths['othernode_paths']['low_loss'] = dict()
+        for interface_name,interface_data in self._rtd["interfaces"].items():
+            for sender_name,sender_data_raw in interface_data["rx-msg-db"].items():
+                sender_data = dict()
+                sender_data = sender_data_raw.copy()
+                neigh_routing_paths = self._add_all_neighs(interface_name, interface_data,
+                                                           sender_name, sender_data_raw,
+                                                           neigh_routing_paths)
+                if len(sender_data['msg']['routingpaths'])>0:
+                   neigh_routing_paths = self._add_all_othernodes_loss(sender_name, sender_data, 
+                                                                       neigh_routing_paths)
+                   neigh_routing_paths = self._add_all_othernodes_bw(sender_name, sender_data, 
+                                                                     neigh_routing_paths)
+        self.log.debug(neigh_routing_paths)
+        return neigh_routing_paths
 
 
-    def _add_all_neighs(self,key_i,value_i,key_s,value_s):
+    def _add_all_neighs(self, interface_name, interface_data, sender_name, sender_data, neigh_routing_paths):
         found_neigh = False
-        if len(self.neigh_routing_paths['neighs']) > 0:
-           for key_r,value_r in self.neigh_routing_paths['neighs'].items():
-               if key_r == key_s:
+        if len(neigh_routing_paths['neighs']) > 0:
+           for neigh_name, neigh_data in neigh_routing_paths['neighs'].items():
+               if neigh_name == sender_name:
                   path_found = False
-                  for valuevalue_r in value_r['paths']["{}>{}".format(self._conf["id"],key_r)]:
-                      if valuevalue_r == key_i:
+                  for neigh_path in neigh_data['paths']["{}>{}".
+                                                        format(self._conf["id"], neigh_name)]:
+                      if neigh_path == interface_name:
                          path_found = True
                          break
                   if path_found == False:
-                     value_r['paths']["{}>{}".format(self._conf["id"],key_r)].append(key_i)
+                     neigh_data['paths']["{}>{}".
+                                         format(self._conf["id"],neigh_name)].append(interface_name)
                   found_neigh = True
                   break
            if found_neigh == False:
-              self._add_neigh_entries(key_s, key_i, value_s)
+              neigh_routing_paths = self._add_neigh_entries(interface_name, sender_name, 
+                                                            sender_data, neigh_routing_paths)
         else:
-            self._add_neigh_entries(key_s, key_i, value_s)
+             neigh_routing_paths = self._add_neigh_entries(interface_name, sender_name, 
+                                                           sender_data, neigh_routing_paths)
+        return neigh_routing_paths
 
 
-    def _add_neigh_entries(self, key_s, key_i, value_s):
-        self.neigh_routing_paths['neighs'][key_s] ={'next-hop':key_s,
-                                                'networks':value_s['msg']['networks'],
-                                                'paths':{"{}>{}".format(self._conf["id"],key_s):[key_i]}
-                                               }
+    def _add_neigh_entries(self, interface_name, sender_name, sender_data, neigh_routing_paths):
+        neigh_routing_paths['neighs'][sender_name] = {'next-hop': sender_name,
+                                                      'networks': sender_data['msg']['networks'],
+                                                      'paths':{"{}>{}".
+                                                               format(self._conf["id"],sender_name):
+                                                               [interface_name]}
+                                                     }
+        return neigh_routing_paths
 
 
-    def _add_all_othernodes(self,key_s,value_s,key_i):
-        if not key_s in self.neigh_routing_paths['othernode_paths']['high_bandwidth']:
-           self.neigh_routing_paths['othernode_paths']['high_bandwidth'][key_s] = dict()
-           self.neigh_routing_paths['othernode_paths']['high_bandwidth'][key_s]['path_characteristics']=dict()
+    def _add_all_othernodes_bw(self, sender_name, sender_data, neigh_routing_paths):
+        othernode_bw = dict()
+        othernode_bw = neigh_routing_paths['othernode_paths']['high_bandwidth'].copy()
+        if not sender_name in othernode_bw:
+           othernode_bw[sender_name] = dict()
+           othernode_bw[sender_name]['path_characteristics'] = dict()
         else:
              self.log.info('updating high bandwidth other nodes from the existing neighbour')
-        self.neigh_routing_paths['othernode_paths']['high_bandwidth'][key_s]=value_s['msg']['routingpaths']['high_bandwidth'].copy()
-        self.neigh_routing_paths['othernode_paths']['high_bandwidth'][key_s]['path_characteristics']=value_s['msg']['routingpaths']['path_characteristics'].copy()
-        if not key_s in self.neigh_routing_paths['othernode_paths']['low_loss']:
-           self.neigh_routing_paths['othernode_paths']['low_loss'][key_s] = dict()
-           self.neigh_routing_paths['othernode_paths']['low_loss'][key_s]['path_characteristics']=dict()
+        othernode_bw[sender_name] = sender_data['msg']['routingpaths']['high_bandwidth'].copy()
+        othernode_bw[sender_name]['path_characteristics'] = sender_data['msg']['routingpaths']['path_characteristics'].copy()
+        neigh_routing_paths['othernode_paths']['high_bandwidth'] = othernode_bw.copy()
+        return neigh_routing_paths
+
+
+    def _add_all_othernodes_loss(self, sender_name, sender_data, neigh_routing_paths):
+        othernode_loss = dict()
+        othernode_loss = neigh_routing_paths['othernode_paths']['low_loss'].copy()
+        if not sender_name in othernode_loss:
+           othernode_loss[sender_name] = dict()
+           othernode_loss[sender_name]['path_characteristics'] = dict()
         else:
              self.log.info('updating low loss other nodes from the existing neighbour')
-        self.neigh_routing_paths['othernode_paths']['low_loss'][key_s]=value_s['msg']['routingpaths']['low_loss'].copy()
-        self.neigh_routing_paths['othernode_paths']['low_loss'][key_s]['path_characteristics']=value_s['msg']['routingpaths']['path_characteristics'].copy()
+        othernode_loss[sender_name] = sender_data['msg']['routingpaths']['low_loss'].copy()
+        othernode_loss[sender_name]['path_characteristics'] = sender_data['msg']['routingpaths']['path_characteristics'].copy()
+        neigh_routing_paths['othernode_paths']['low_loss'] = othernode_loss.copy()
+        return neigh_routing_paths
 
 
-    def _calc_fib_low_loss(self):
+    def _calc_fib_low_loss(self, neigh_routing_paths):
         weigh_loss = dict()
-        for key_n, value_n in self.neigh_routing_paths['neighs'].items():
-            weigh_loss = self._loss_path_compression(key_n, value_n)
-            self.add_loss_entry(key_n,value_n,weigh_loss)
-        self.add_fib_lowloss_neighs()
-        if len(self.neigh_routing_paths['othernode_paths']['low_loss']) > 0:
-           self._calc_shortestloss_path()
-        self._map_path_characteristics_loss()
+        compressedloss=dict()
+        for neigh_name, neigh_data in neigh_routing_paths['neighs'].items():
+            weigh_loss = self._loss_path_compression(neigh_data)
+            compressedloss = self.add_loss_entry(neigh_name, neigh_data, 
+                                                 weigh_loss, compressedloss)
+        self.fib['low_loss'] = compressedloss.copy()
+        if len(neigh_routing_paths['othernode_paths']['low_loss']) > 0:
+           self._calc_shortestloss_path(neigh_routing_paths)
+        self._map_path_characteristics_loss(neigh_routing_paths)
         for i in range(2):
-            self._add_self_to_neigh_losspath()
+            self._add_self_to_neigh_losspathnumber()
         self._add_lossweight_to_dest()
 
 
-    def _calc_fib_high_bandwidth(self):
+    def _calc_fib_high_bandwidth(self, neigh_routing_paths):
         weigh_bandwidth = dict()
-        for key_n, value_n in self.neigh_routing_paths['neighs'].items():
-            weigh_bandwidth = self._bandwidth_path_compression(key_n, value_n)
-            self.add_bandwidth_entry(key_n,value_n,weigh_bandwidth)
-        self.add_fib_highBW_neighs()
-        if len(self.neigh_routing_paths['othernode_paths']['high_bandwidth']) > 0:
-           self._calc_widestBW_path()
-        self._map_path_characteristics_BW()
+        compressedBW = dict()
+        for neigh_name, neigh_data in neigh_routing_paths['neighs'].items():
+            weigh_bandwidth = self._bandwidth_path_compression(neigh_data)
+            compressedBW = self.add_bandwidth_entry(neigh_name, neigh_data, 
+                                                    weigh_bandwidth, compressedBW)
+        self.fib['high_bandwidth'] = compressedBW.copy()
+        if len(neigh_routing_paths['othernode_paths']['high_bandwidth']) > 0:
+           self._calc_widestBW_path(neigh_routing_paths)
+        self._map_path_characteristics_BW(neigh_routing_paths)
         for i in range(2):
-            self._add_self_to_neigh_bandwidthpath()
+            self._add_self_to_neigh_bandwidthpathnumber()
         self._add_bandwidthweight_to_dest()
 
 
-    def _loss_path_compression(self,key_n,value_n):
-         loss_dict = dict()
-         for key,value in value_n['paths'].items():
-             for valuevalue in value:
-                 for key_path in self._conf['interfaces']:
-                     if key_path['name']==valuevalue:
-                        if len(loss_dict)>0:
-                           for key_l,value_l in loss_dict.items():
-                               if key_path['link-characteristics']['loss']<value_l:
-                                  loss_dict=dict()
-                                  loss_dict[key_path['name']]=key_path['link-characteristics']['loss']
-                        else:
-                           loss_dict[key_path['name']]=key_path['link-characteristics']['loss']
-                        break
-         return loss_dict
+    def _loss_path_compression(self, neigh_data):
+        loss_dict = dict()
+        for neigh_path_key,neigh_paths_name in neigh_data['paths'].items():
+            for neigh_path_name in neigh_paths_name:
+                for interface_name in self._conf['interfaces']:
+                    if interface_name['name'] == neigh_path_name:
+                       if len(loss_dict)>0:
+                          for path_name, path_weight in loss_dict.items():
+                              if interface_name['link-characteristics']['loss'] < path_weight:
+                                 loss_dict = dict()
+                                 loss_dict[interface_name['name']] = interface_name['link-characteristics']['loss']
+                       else:
+                            loss_dict[interface_name['name']] = interface_name['link-characteristics']['loss']
+                       break
+        return loss_dict
 
 
-    def _bandwidth_path_compression(self,key_n,value_n):
-         bandwidth_dict = dict()
-         for key,value in value_n['paths'].items():
-             for valuevalue in value:
-                 for key_path in self._conf['interfaces']:
-                     if key_path['name']==valuevalue:
-                        if len(bandwidth_dict)>0:
-                           for key_l,value_l in bandwidth_dict.items():
-                               if key_path['link-characteristics']['bandwidth']>value_l:
-                                  bandwidth_dict=dict()
-                                  bandwidth_dict[key_path['name']]=key_path['link-characteristics']['bandwidth']
-                        else:
-                           bandwidth_dict[key_path['name']]=key_path['link-characteristics']['bandwidth']
-                        break
-         return bandwidth_dict
+    def _bandwidth_path_compression(self, neigh_data):
+        bandwidth_dict = dict()
+        for neigh_path_key, neigh_paths_name in neigh_data['paths'].items():
+            for neigh_path_name in neigh_paths_name:
+                for interface_name in self._conf['interfaces']:
+                    if interface_name['name'] == neigh_path_name:
+                       if len(bandwidth_dict)>0:
+                          for path_name, path_weight in bandwidth_dict.items():
+                              if interface_name['link-characteristics']['bandwidth'] > path_weight:
+                                 bandwidth_dict=dict()
+                                 bandwidth_dict[interface_name['name']] = interface_name['link-characteristics']['bandwidth']
+                       else:
+                            bandwidth_dict[interface_name['name']] = interface_name['link-characteristics']['bandwidth']
+                       break
+        return bandwidth_dict
 
 
-    def add_loss_entry(self,key_n,value_n,weigh_loss):
-        route="{}>{}".format(self._conf["id"],key_n)
-        self.compressedloss[key_n]={'next-hop':value_n['next-hop'],
-                                     'networks':value_n['networks']
+    def add_loss_entry(self, neigh_name, neigh_data, weigh_loss, compressedloss):
+        route="{}>{}".format(self._conf["id"], neigh_name)
+        compressedloss[neigh_name] = {'next-hop':neigh_data['next-hop'],
+                                      'networks':neigh_data['networks']
                                      }
-        for key_w,value_w in weigh_loss.items():
-            self.compressedloss[key_n]['weight']=value_w
-            self.compressedloss[key_n]['paths']=dict()
-            self.compressedloss[key_n]['paths'][route]=key_w
+        for path_name, path_weight in weigh_loss.items():
+            compressedloss[neigh_name]['weight'] = path_weight
+            compressedloss[neigh_name]['paths'] = dict()
+            compressedloss[neigh_name]['paths'][route] = path_name
+        return compressedloss
 
 
-    def add_bandwidth_entry(self,key_n,value_n,weigh_bandwidth):
-        route="{}>{}".format(self._conf["id"],key_n)
-        self.compressedBW[key_n]={'next-hop':value_n['next-hop'],
-                                  'networks':value_n['networks']
-                                 }
-        for key_w,value_w in weigh_bandwidth.items():
-            self.compressedBW[key_n]['weight']=value_w
-            self.compressedBW[key_n]['paths']=dict()
-            self.compressedBW[key_n]['paths'][route]=key_w
+    def add_bandwidth_entry(self, neigh_name, neigh_data, weigh_bandwidth, compressedBW):
+        route="{}>{}".format(self._conf["id"], neigh_name)
+        compressedBW[neigh_name] = {'next-hop':neigh_data['next-hop'],
+                                    'networks':neigh_data['networks']
+                                   }
+        for path_name, path_weight in weigh_bandwidth.items():
+            compressedBW[neigh_name]['weight'] = path_weight
+            compressedBW[neigh_name]['paths'] = dict()
+            compressedBW[neigh_name]['paths'][route] = path_name
+        return compressedBW
 
 
-    def add_fib_lowloss_neighs(self):
-        if len(self.fib['low_loss'])>0:
-           found_dest=False
-           for key_node,value_node in self.compressedloss.items():
-               for key_dest,value_dest in self.fib['low_loss'].items():
-                   if key_dest==key_node:
-                      value_dest=dict()
-                      value_dest=value_node.copy()
-                      found_dest=True
-                      break
-               if found_dest==False:
-                  self.fib['low_loss'][key_node]=value_node.copy()
-        else:
-             self.fib['low_loss']=self.compressedloss.copy()
-
-
-    def add_fib_highBW_neighs(self):
-        if len(self.fib['high_bandwidth'])>0:
-           found_dest=False
-           for key_node,value_node in self.compressedloss.items():
-               for key_dest,value_dest in self.fib['high_bandwidth'].items():
-                   if key_dest==key_node:
-                      value_dest=dict()
-                      value_dest=value_node.copy()
-                      found_dest=True
-                      break
-               if found_dest==False:
-                  self.fib['high_bandwidth'][key_node]=value_node.copy()
-        else:
-             self.fib['high_bandwidth']=self.compressedBW.copy()
-
-
-    def _calc_shortestloss_path(self):
+    def _calc_shortestloss_path(self, neigh_routing_paths):
         path_weight=dict()
-        for key_neigh,value_neigh in self.neigh_routing_paths['othernode_paths']['low_loss'].items():
-            for key_dest,value_dest in value_neigh.items():
-                if key_dest != 'path_characteristics':
-                   if key_dest==self._conf["id"]:
+        for node_name, node_data in neigh_routing_paths['othernode_paths']['low_loss'].items():
+            for dest_name, dest_data in node_data.items():
+                if dest_name != 'path_characteristics':
+                   if dest_name == self._conf["id"]:
                       self.log.info('ignore self routing')
                    else:
-                        weight_update=int(value_dest['weight'])+int(self.fib['low_loss'][key_neigh]['weight'])
-                        loop_found=False
-                        for key_path,value_path in value_dest['paths'].items():
-                            if key_path[0]==self._conf["id"] or key_path[2]==self._conf["id"]:
-                                loop_found=True
+                        weight_update=int(dest_data['weight'])+int(self.fib['low_loss'][node_name]['weight'])
+                        loop_found = False
+                        for path_name, path_value in dest_data['paths'].items():
+                            if path_name[0] == self._conf["id"] or path_name[2] == self._conf["id"]:
+                                loop_found = True
                                 self.log.info('self_id in the path so avoiding looping')
                                 break
                         if loop_found==False:
                             self.log.info('No loop will occur in this path')
-                            self.add_shortestloss_path(weight_update,key_neigh,key_dest,value_dest)
+                            self.add_shortestloss_path(weight_update, node_name, dest_name, dest_data)
 
 
-    def add_shortestloss_path(self,weight_update,key_neigh,key_dest,value_dest):
-        if not key_dest in self.fib['low_loss']:
+    def add_shortestloss_path(self, weight_update, node_name, dest_name, dest_data):
+        if not dest_name in self.fib['low_loss']:
            self.log.info('it is a new entry to destination')
-           self.fib['low_loss'][key_dest]=dict()
-           self._map_loss_values(key_neigh,weight_update,key_dest,value_dest)
+           self.fib['low_loss'][dest_name]=dict()
+           self._map_loss_values(node_name, weight_update, dest_name, dest_data)
         else:
              self.log.info('updating existing destination entry in fib')
-             if weight_update<self.fib['low_loss'][key_dest]['weight']:
-                self._map_loss_values(key_neigh,weight_update,key_dest,value_dest)
+             if weight_update < self.fib['low_loss'][dest_name]['weight']:
+                self._map_loss_values(node_name, weight_update, dest_name, dest_data)
 
 
-    def _map_loss_values(self,key_neigh,weight_update,key_dest,value_dest):
-        self.fib['low_loss'][key_dest]['networks']=list()
-        self.fib['low_loss'][key_dest]['paths']=dict()
-        self.fib['low_loss'][key_dest]['weight']=weight_update
-        self.fib['low_loss'][key_dest]['next-hop']=key_neigh
-        self.fib['low_loss'][key_dest]['networks']=value_dest['networks'].copy()
-        self.fib['low_loss'][key_dest]['paths']=value_dest['paths'].copy()
+    def _map_loss_values(self, node_name, weight_update, dest_name, dest_data):
+        data = self.fib['low_loss'][dest_name]
+        data['networks'] = list()
+        data['paths'] = dict()
+        data['weight'] = weight_update
+        data['next-hop'] = node_name
+        data['networks'] = dest_data['networks'].copy()
+        data['paths'] = dest_data['paths'].copy()
 
 
-    def _calc_widestBW_path(self):
-        path_weight=dict()
-        for key_neigh,value_neigh in self.neigh_routing_paths['othernode_paths']['high_bandwidth'].items():
-            for key_dest,value_dest in value_neigh.items():
-                if key_dest != 'path_characteristics':
-                   if key_dest==self._conf["id"]:
+    def _calc_widestBW_path(self, neigh_routing_paths):
+        path_weight = dict()
+        for node_name, node_data in neigh_routing_paths['othernode_paths']['high_bandwidth'].items():
+            for dest_name, dest_data in node_data.items():
+                if dest_name != 'path_characteristics':
+                   if dest_name == self._conf["id"]:
                       self.log.info('ignore self routing')
                    else:
-                        weight_update=int(value_dest['weight'])+int(self.fib['high_bandwidth'][key_neigh]['weight'])
+                        weight_update=int(dest_data['weight'])+int(self.fib['high_bandwidth'][node_name]['weight'])
                         loop_found=False
-                        for key_path,value_path in value_dest['paths'].items():
-                            if key_path[0]==self._conf["id"] or key_path[2]==self._conf["id"]:
-                               loop_found=True
+                        for path_name, path_value in dest_data['paths'].items():
+                            if path_name[0]==self._conf["id"] or path_name[2]==self._conf["id"]:
+                               loop_found = True
                                self.log.info('self_id in the path so avoiding looping')
                                break
                         if loop_found==False:
                            self.log.info('No loop will occur in this path')
-                           self.add_widestBW_path(weight_update,key_neigh,key_dest,value_dest)
+                           self.add_widestBW_path(weight_update, node_name, dest_name, dest_data)
 
 
-    def add_widestBW_path(self,weight_update,key_neigh,key_dest,value_dest):
-        if not key_dest in self.fib['high_bandwidth']:
+    def add_widestBW_path(self, weight_update, node_name, dest_name, dest_data):
+        if not dest_name in self.fib['high_bandwidth']:
            self.log.info('it is a new entry to destination')
-           self.fib['high_bandwidth'][key_dest]=dict()
-           self._map_BW_values(key_neigh,weight_update,value_dest,key_dest)
+           self.fib['high_bandwidth'][dest_name]=dict()
+           self._map_BW_values(node_name, weight_update, dest_name, dest_data)
         else:
-             if weight_update<self.fib['high_bandwidth'][key_dest]['weight']:
+             if weight_update < self.fib['high_bandwidth'][key_dest]['weight']:
                 self.log.info('updating existing destination entry in fib')
-                self._map_BW_values(key_neigh,weight_update,value_dest,key_dest)
+                self._map_BW_values(node_name, weight_update, dest_name, dest_data)
 
 
-    def _map_BW_values(self,key_neigh,weight_update,value_dest,key_dest):
-        data = self.fib['high_bandwidth'][key_dest]
-        data['networks']=list()
-        data['paths']=dict()
-        data['next-hop']=key_neigh
-        data['weight']=weight_update
-        data['networks']=value_dest['networks'].copy()
-        data['paths']=value_dest['paths'].copy()
+    def _map_BW_values(self, node_name, weight_update, dest_name, dest_data):
+        data = self.fib['high_bandwidth'][dest_name]
+        data['networks'] = list()
+        data['paths'] = dict()
+        data['next-hop'] = node_name
+        data['weight'] = weight_update
+        data['networks'] = dest_data['networks'].copy()
+        data['paths'] = dest_data['paths'].copy()
 
 
-    def _map_path_characteristics_loss(self):
-        path_num=1
-        for key_dest,value_dest in self.fib['low_loss'].items():
-            next_hop=value_dest['next-hop']
-            path_num_found=False
-            if key_dest!=next_hop:
+    def _map_path_characteristics_loss(self, neigh_routing_paths):
+        path_num = 1
+        for dest_name, dest_data in self.fib['low_loss'].items():
+            next_hop = dest_data['next-hop']
+            path_num_found = False
+            if dest_name!=next_hop:
                self.log.info('This is not neighbour destination-loss')
-               for key_path,value_path in value_dest['paths'].items():
-                   for key_char,value_char in self.neigh_routing_paths['othernode_paths']['low_loss'][next_hop]['path_characteristics'].items():
-                       if value_path==key_char:
-                          path_num_found=True
-                          path_num_new=self._map_path_number(value_char,path_num)
+               for path_dir, path_name in dest_data['paths'].items():
+                   for path_number,path_data in neigh_routing_paths['othernode_paths']['low_loss'][next_hop]['path_characteristics'].items():
+                       if path_name==path_number:
+                          path_num_found = True
+                          path_num_new = self._map_path_number(path_data, path_num)
                           break
                    if path_num_found==True:
-                      value_dest['paths'][key_path]=path_num_new
-            if key_dest==next_hop:
+                      dest_data['paths'][path_dir] = path_num_new
+            if dest_name==next_hop:
                self.log.info('This is neighbour destination-loss')
-               for key_path,value_path in value_dest['paths'].items():
-                   for p in self._conf['interfaces']:
-                       if p['name']==value_path:
-                          path_num_found=True
-                          value_char=dict()
-                          value_char['loss']=p['link-characteristics']['loss']
-                          value_char['bandwidth']=p['link-characteristics']['bandwidth']
-                          path_num_new=self._map_path_number(value_char,path_num)
+               for path_dir, path_name in dest_data['paths'].items():
+                   for interface in self._conf['interfaces']:
+                       if interface['name']==path_name:
+                          path_num_found = True
+                          path_data = dict()
+                          path_data['loss'] = interface['link-characteristics']['loss']
+                          path_data['bandwidth'] = interface['link-characteristics']['bandwidth']
+                          path_num_new = self._map_path_number(path_data, path_num)
                           break
                    if path_num_found==True:
-                      value_dest['paths'][key_path]=path_num_new
+                      dest_data['paths'][path_dir] = path_num_new
 
 
-    def _map_path_characteristics_BW(self):
-        path_num=1
-        for key_dest,value_dest in self.fib['high_bandwidth'].items():
-            next_hop=value_dest['next-hop']
-            path_num_found=False
-            if key_dest!=next_hop:
+    def _map_path_characteristics_BW(self, neigh_routing_paths):
+        path_num = 1
+        for dest_name, dest_data in self.fib['high_bandwidth'].items():
+            next_hop = dest_data['next-hop']
+            path_num_found = False
+            if dest_name!=next_hop:
                self.log.info('This is not neighbour destination-BW')
-               for key_path,value_path in value_dest['paths'].items():
-                   for key_char,value_char in self.neigh_routing_paths['othernode_paths']['high_bandwidth'][next_hop]['path_characteristics'].items():
-                       if value_path==key_char:
-                          path_num_found=True
-                          path_num_new=self._map_path_number(value_char,path_num)
+               for path_dir, path_name in dest_data['paths'].items():
+                   for path_number, path_data in neigh_routing_paths['othernode_paths']['high_bandwidth'][next_hop]['path_characteristics'].items():
+                       if path_name==path_number:
+                          path_num_found = True
+                          path_num_new = self._map_path_number(path_data, path_num)
                           break
                    if path_num_found==True:
-                      value_dest['paths'][key_path]=path_num_new
-            if key_dest==next_hop:
+                      dest_data['paths'][path_dir] = path_num_new
+            if dest_name==next_hop:
                  self.log.info('This is neighbour destination-BW')
-                 for key_path,value_path in value_dest['paths'].items():
-                     for p in self._conf['interfaces']:
-                         if p['name']==value_path:
-                            path_num_found=True
-                            value_char=dict()
-                            value_char['loss']=p['link-characteristics']['loss']
-                            value_char['bandwidth']=p['link-characteristics']['bandwidth']
-                            path_num_new=self._map_path_number(value_char,path_num)
+                 for path_dir, path_name in dest_data['paths'].items():
+                     for interface in self._conf['interfaces']:
+                         if interface['name']==path_name:
+                            path_num_found = True
+                            path_data = dict()
+                            path_data['loss'] = interface['link-characteristics']['loss']
+                            path_data['bandwidth'] = interface['link-characteristics']['bandwidth']
+                            path_num_new = self._map_path_number(path_data, path_num)
                             break
                      if path_num_found==True:
-                        value_dest['paths'][key_path]=path_num_new
+                        dest_data['paths'][path_dir] = path_num_new
 
 
-    def _map_path_number(self,value_char,path_num):
-        path_char_found=False
-        for key_fib,value_fib in self.fib['path_characteristics'].items():
-            if (value_char['loss']==value_fib['loss']) and (value_char['bandwidth']==value_fib['bandwidth']):
+    def _map_path_number(self, path_data, path_num):
+        path_char_found = False
+        for fib_path_name, fib_path_data in self.fib['path_characteristics'].items():
+            if (path_data['loss']==fib_path_data['loss']) and (path_data['bandwidth']==fib_path_data['bandwidth']):
                self.log.info('This is already existing path cahracteristic')
-               path_num_new=key_fib
-               path_char_found=True
+               path_num_new = fib_path_name
+               path_char_found = True
                break
         if path_char_found==False:
            while True:
                  if not str(path_num) in self.fib['path_characteristics']:
-                    path_num_new=str(path_num)
+                    path_num_new = str(path_num)
                     self.log.info('This path number is unique')
                     break
                  else:
                       path_num+=1
-           self.fib['path_characteristics'][path_num_new]=value_char
+           self.fib['path_characteristics'][path_num_new] = path_data
         return path_num_new
 
 
-    def _add_self_to_neigh_losspath(self):
-        for key_dest,value_dest in self.fib['low_loss'].items():
-            next_hop=value_dest['next-hop']
-            if key_dest!=next_hop:
-               for key_i,value_i in self.fib['low_loss'][next_hop]['paths'].items():
-                   self.fib['low_loss'][key_dest]['paths'][key_i]=value_i
+    def _add_self_to_neigh_losspathnumber(self):
+        for dest_name, dest_data in self.fib['low_loss'].items():
+            next_hop = dest_data['next-hop']
+            if dest_name != next_hop:
+               for path_dir, path_name in self.fib['low_loss'][next_hop]['paths'].items():
+                   self.fib['low_loss'][dest_name]['paths'][path_dir] = path_name
 
 
-    def _add_self_to_neigh_bandwidthpath(self):
-        for key_dest,value_dest in self.fib['high_bandwidth'].items():
-            next_hop=value_dest['next-hop']
-            if key_dest!=next_hop:
-               for key_i,value_i in self.fib['high_bandwidth'][next_hop]['paths'].items():
-                   self.fib['high_bandwidth'][key_dest]['paths'][key_i]=value_i
+    def _add_self_to_neigh_bandwidthpathnumber(self):
+        for dest_name, dest_data in self.fib['high_bandwidth'].items():
+            next_hop = dest_data['next-hop']
+            if dest_name!=next_hop:
+               for path_dir, path_name in self.fib['high_bandwidth'][next_hop]['paths'].items():
+                   self.fib['high_bandwidth'][dest_name]['paths'][path_dir] = path_name
 
 
     def _add_lossweight_to_dest(self):
-        for key_dest,value_dest in self.fib['low_loss'].items():
-            self.fib['low_loss'][key_dest]['weight']=0
-            for key_path,value_path in value_dest['paths'].items():
-                for key_char,value_char in self.fib['path_characteristics'].items():
-                    if value_path==key_char:
-                       self.fib['low_loss'][key_dest]['weight']=self.fib['low_loss'][key_dest]['weight']+value_char['loss']
+        for dest_name, dest_data in self.fib['low_loss'].items():
+            self.fib['low_loss'][dest_name]['weight']=0
+            for path_dir, path_name in dest_data['paths'].items():
+                for path_name_fib, path_data_fib in self.fib['path_characteristics'].items():
+                    if path_name==path_name_fib:
+                       self.fib['low_loss'][dest_name]['weight'] = self.fib['low_loss'][dest_name]['weight']+path_data_fib['loss']
                        break
 
 
     def _add_bandwidthweight_to_dest(self):
-        for key_dest,value_dest in self.fib['high_bandwidth'].items():
-            self.fib['high_bandwidth'][key_dest]['weight']=0
-            for key_path,value_path in value_dest['paths'].items():
-                for key_char,value_char in self.fib['path_characteristics'].items():
-                    if value_path==key_char:
-                       self.fib['high_bandwidth'][key_dest]['weight']=self.fib['high_bandwidth'][key_dest]['weight']+value_char['bandwidth']
+        for dest_name, dest_data in self.fib['high_bandwidth'].items():
+            self.fib['high_bandwidth'][dest_name]['weight']=0
+            for path_dir, path_name in dest_data['paths'].items():
+                for path_name_fib, path_data_fib in self.fib['path_characteristics'].items():
+                    if path_name==path_name_fib:
+                       self.fib['high_bandwidth'][dest_name]['weight'] = self.fib['high_bandwidth'][dest_name]['weight']+path_data_fib['bandwidth']
                        break
 
 
     def _calc_loss_routingtable(self):
         self._routing_table['lowest-loss']=list()
-        for key_dest,value_dest in self.fib['low_loss'].items():
-            for i in value_dest['networks']:
-               loss_entry=dict()
-               for key_prefix,value_prefix in i.items():
-                   loss_entry['proto'] = "v4"
-                   ip_pref_len = value_prefix.split("/")
-                   loss_entry['prefix'] = ip_pref_len[0]
-                   loss_entry['prefix-len'] = ip_pref_len[1]
-                   loss_entry['next-hop'] = value_dest['next-hop'] 
-               search_key='{}>{}'.format(self._conf["id"],loss_entry['next-hop'])
-               for key_i,value_i in value_dest['paths'].items():
-                   if key_i==search_key:
-                      for key_fib,value_fib in self.fib['path_characteristics'].items():
-                          if key_fib==value_i:
-                             path_found=False
-                             for p in self._conf['interfaces']:
-                                 q=dict()
-                                 q=p['link-characteristics']
-                                 if q['loss']==value_fib['loss'] and q['bandwidth']==value_fib['bandwidth']:
-                                    path_found=True
-                                    loss_entry['interface']=p['name']
-                                    break
-                             if path_found==True:
-                                break
-                      break
-               self._routing_table['lowest-loss'].append(loss_entry)
+        for dest_name, dest_data in self.fib['low_loss'].items():
+            for network in dest_data['networks']:
+                loss_entry = dict()
+                for prefix_type, prefix_ip in network.items():
+                    loss_entry['proto'] = "v4"
+                    ip_pref_len = prefix_ip.split("/")
+                    loss_entry['prefix'] = ip_pref_len[0]
+                    loss_entry['prefix-len'] = ip_pref_len[1] 
+                search_key = '{}>{}'.format(self._conf["id"], dest_data['next-hop'])
+                for path_dir, path_name in dest_data['paths'].items():
+                    if path_dir==search_key:
+                       for fib_path_name, fib_path_data in self.fib['path_characteristics'].items():
+                           if fib_path_name==path_name:
+                              path_found = False
+                              for interface in self._conf['interfaces']:
+                                  path_char = dict()
+                                  path_char = interface['link-characteristics']
+                                  if path_char['loss']==fib_path_data['loss'] and path_char['bandwidth']==fib_path_data['bandwidth']:
+                                     path_found = True
+                                     loss_entry['interface'] = interface['name']
+                                     break
+                              if path_found==True:
+                                 break
+                       break
+                loss_entry['next-hop'] = self.next_hop_ip_addr(loss_entry['proto'], dest_data['next-hop'], loss_entry['interface'])
+                self._routing_table['lowest-loss'].append(loss_entry)
 
 
     def _calc_bw_routingtable(self):
         self._routing_table['highest-bandwidth']=list()
-        for key_dest,value_dest in self.fib['high_bandwidth'].items():
-            for i in value_dest['networks']:
-               loss_entry=dict()
-               for key_prefix,value_prefix in i.items():
-                   loss_entry['proto'] = "v4"
-                   ip_pref_len = value_prefix.split("/")
-                   loss_entry['prefix'] = ip_pref_len[0]
-                   loss_entry['prefix-len'] = ip_pref_len[1]
-                   loss_entry['next-hop'] = value_dest['next-hop']    
-               search_key='{}>{}'.format(self._conf["id"],loss_entry['next-hop'])
-               for key_i,value_i in value_dest['paths'].items():
-                   if key_i==search_key:
-                      for key_fib,value_fib in self.fib['path_characteristics'].items():
-                          if key_fib==value_i:
-                             path_found=False
-                             for p in self._conf['interfaces']:
-                                 q=dict()
-                                 q=p['link-characteristics']
-                                 if q['loss']==value_fib['loss'] and q['bandwidth']==value_fib['bandwidth']:
-                                    path_found=True
-                                    loss_entry['interface']=p['name']
+        for dest_name, dest_data in self.fib['high_bandwidth'].items():
+            for network in dest_data['networks']:
+                bw_entry=dict()
+                for prefix_type, prefix_ip in network.items():
+                    bw_entry['proto'] = "v4"
+                    ip_pref_len = prefix_ip.split("/")
+                    bw_entry['prefix'] = ip_pref_len[0]
+                    bw_entry['prefix-len'] = ip_pref_len[1]   
+                search_key='{}>{}'.format(self._conf["id"], dest_data['next-hop'])
+                for path_dir, path_name in dest_data['paths'].items():
+                   if path_dir==search_key:
+                      for fib_path_name, fib_path_data in self.fib['path_characteristics'].items():
+                          if fib_path_name==path_name:
+                             path_found = False
+                             for interface in self._conf['interfaces']:
+                                 path_char = dict()
+                                 path_char = interface['link-characteristics']
+                                 if path_char['loss']==fib_path_data['loss'] and path_char['bandwidth']==fib_path_data['bandwidth']:
+                                    path_found = True
+                                    bw_entry['interface'] = interface['name']
                                     break
                              if path_found==True:
                                 break
                       break
-               self._routing_table['highest-bandwidth'].append(loss_entry)
+                bw_entry['next-hop'] = self.next_hop_ip_addr(bw_entry['proto'], dest_data['next-hop'], bw_entry['interface'])
+                self._routing_table['highest-bandwidth'].append(bw_entry)
 
 
     def register_get_time_cb(self, function, priv_data=None):
