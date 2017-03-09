@@ -697,7 +697,7 @@ class DMPR(object):
            self.fib['high_bandwidth'][dest_name]=dict()
            self._map_BW_values(node_name, weight_update, dest_name, dest_data)
         else:
-             if weight_update < self.fib['high_bandwidth'][key_dest]['weight']:
+             if weight_update < self.fib['high_bandwidth'][dest_name]['weight']:
                 self.log.info('updating existing destination entry in fib')
                 self._map_BW_values(node_name, weight_update, dest_name, dest_data)
 
