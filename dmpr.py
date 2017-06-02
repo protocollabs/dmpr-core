@@ -869,6 +869,7 @@ class DMPR(object):
                     bw_entry['prefix'] = ip_pref_len[0]
                     bw_entry['prefix-len'] = ip_pref_len[1]   
                 search_key='{}>{}'.format(self._conf["id"], dest_data['next-hop'])
+                path_found = False
                 for path_dir, path_name in dest_data['paths'].items():
                    if path_dir==search_key:
                       for fib_path_name, fib_path_data in self.fib['path_characteristics'].items():
@@ -881,11 +882,12 @@ class DMPR(object):
                                     path_found = True
                                     bw_entry['interface'] = interface['name']
                                     break
-                             if path_found==True:
+                             if path_found == True:
                                 break
                       break
-                bw_entry['next-hop'] = self.next_hop_ip_addr(bw_entry['proto'], dest_data['next-hop'], bw_entry['interface'])
-                self._routing_table['highest-bandwidth'].append(bw_entry)
+                if path_found:
+                    bw_entry['next-hop'] = self.next_hop_ip_addr(bw_entry['proto'], dest_data['next-hop'], bw_entry['interface'])
+                    self._routing_table['highest-bandwidth'].append(bw_entry)
 
 
     def register_get_time_cb(self, function, priv_data=None):
