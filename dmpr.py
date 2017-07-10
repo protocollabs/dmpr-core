@@ -248,6 +248,7 @@ class DMPR(object):
             self._recalculate_routing_table()
 
         now = self._get_time(priv_data=self._get_time_priv_data)
+        self.tracer.log(self.tracer.TICK, {'now' : now})
         if now >= self._next_tx_time:
             self.tx_route_packet()
             self._calc_next_tx_time()
