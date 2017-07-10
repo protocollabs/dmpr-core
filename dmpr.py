@@ -51,13 +51,25 @@ class DMPRConfigDefaults(object):
     LINK_CHARACTERISITCS_COST = "0"
 
 
+class NoOpTracer(object):
+    # Just a stub do nothing, just catch calls for
+    # the case no trace instance is passed
+
+    def __init__(self):
+        pass
+
+    def log(self, tracepoint, msg):
+        pass
+
+
 class DMPR(object):
 
-    def __init__(self, log=None):
+    def __init__(self, log=None, tracer=None):
         assert(log)
         self._conf = None
         self._time = None
         self.log = log
+        self.tracer = NoOpTracer() if tracer is None else tracer
         self.stop(init=True)
 
 
@@ -66,10 +78,10 @@ class DMPR(object):
             an error when values are wrongly configured """
         assert(configuration)
         assert isinstance(configuration, dict)
-        self.process_conf(configuration)
+        self.validate_config(configuration)
 
 
-    def process_conf(self, configuration):
+    def validate_config(self, configuration):
         """ convert external python dict configuration
             into internal configuration and check values """
         assert(configuration)
