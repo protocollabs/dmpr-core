@@ -65,13 +65,14 @@ class NoOpTracer(object):
 
 
 class DMPR(object):
+    # TODO: change signature, log is required
     def __init__(self, log=None, tracer=None):
         assert (log)
         self._conf = None
         self._time = None
         self.log = log
         self.tracer = NoOpTracer() if tracer is None else tracer
-        self.stop(init=True)
+        self._reset()
 
     def register_configuration(self, configuration):
         """ register and setup configuration. Raise
@@ -247,15 +248,13 @@ class DMPR(object):
         else:
             self.transmitted_now = False
 
+    def stop(self):
+        self._reset()
+        now = self._get_time(priv_data=self._get_time_priv_data)
+        self.log.warning("stop DMPR core", time=now)
 
-    def stop(self, init=False):
-        self._started = False
-        if not init:
-            # this function is also called in the
-            # constructor, so do not print stop when
-            # we never started
-            now = self._get_time(priv_data=self._get_time_priv_data)
-            self.log.warning("stop DMPR core", time=now)
+    def _reset(self):
+        self.started = False
         self._routing_table = None
         self._next_tx_time = None
 
