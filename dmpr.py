@@ -331,34 +331,36 @@ class DMPR(object):
         return True
 
     # FIXME: search log for update here
-    def _cmp_dicts(self, dict1, dict2):
-        if dict1 == None or dict2 == None: return False
-        if type(dict1) is not dict or type(dict2) is not dict: return False
-        shared_keys = set(dict2.keys()) & set(dict2.keys())
-        if not len(shared_keys) == len(dict1.keys()) and len(shared_keys) == len(dict2.keys()):
+    @classmethod
+    def _cmp_dicts(cls, dict1, dict2):
+        if dict1 is None or dict2 is None:
             return False
-        eq = True
-        for key in dict1.keys():
-            if type(dict1[key]) is dict:
-                if key not in dict2:
-                    return False
-                else:
-                    eq = eq and self._cmp_dicts(dict1[key], dict2[key])
-            else:
-                if key not in dict2:
-                    return False
-                else:
-                    eq = eq and (dict1[key] == dict2[key])
-        return eq
 
-    def _cmp_packets(self, packet1, packet2):
+        if not isinstance(dict1, dict) or not isinstance(dict2, dict):
+            return False
+
+        if set(dict1.keys()) != set(dict2.keys()):
+            return False
+
+        for key, value in dict1.items():
+            if isinstance(value, dict):
+                if not cls._cmp_dicts(dict1[key], dict2[key]):
+                    return False
+            else:
+                if dict1[key] != dict2[key]:
+                    return False
+
+        return True
+
+    @classmethod
+    def _cmp_packets(cls, packet1, packet2):
         p1 = copy.deepcopy(packet1)
         p2 = copy.deepcopy(packet2)
         # some data may differ, but the content is identical,
         # zeroize them here out
         p1['sequence-no'] = 0
         p2['sequence-no'] = 0
-        return self._cmp_dicts(p1, p2)
+        return cls._cmp_dicts(p1, p2)
 
     def msg_rx(self, interface_name, msg):
         """ receive routing packet in json encoded
