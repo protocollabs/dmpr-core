@@ -84,7 +84,9 @@ class DMPR(object):
     def validate_config(self, configuration):
         """ convert external python dict configuration
             into internal configuration and check values """
-        assert (configuration)
+        if not isinstance(configuration, dict):
+            raise ConfigurationException("configuration must be dict-like")
+
         self._conf = {}
         cmd = "rtn-msg-interval"
         self._conf[cmd] = configuration.get(cmd, DMPRConfigDefaults.rtn_msg_interval)
@@ -179,13 +181,11 @@ class DMPR(object):
         for iface_data in self._conf["interfaces"]:
             if iface_data['name'] == iface_name:
                 return iface_data['addr-v6']
-        return None
 
     def conf_originator_addr_by_iface_v4(self, iface_name):
         for iface_data in self._conf["interfaces"]:
             if iface_data['name'] == iface_name:
                 return iface_data['addr-v4']
-        return None
 
     def conf_originator_addr_by_iface(self, proto, iface_name):
         if proto == "v4":
@@ -261,11 +261,11 @@ class DMPR(object):
     def start(self):
         now = self._get_time(priv_data=self._get_time_priv_data)
         self.log.info("start DMPR core", time=now)
-        assert (self._get_time)
-        assert (self._routing_table_update_func)
-        assert (self._packet_tx_func)
-        assert (self._conf)
-        assert (self._routing_table == None)
+        assert self._get_time
+        assert self._routing_table_update_func
+        assert self._packet_tx_func
+        assert self._conf
+        assert self._routing_table is None
         self._init_runtime_data()
         self._calc_next_tx_time()
         self._started = True
@@ -308,11 +308,10 @@ class DMPR(object):
         self.log.debug("schedule next transmission for {} seconds".format(self._next_tx_time), time=now)
 
     def _is_valid_interface(self, interface_name):
-        found = False
         for interface in self._conf["interfaces"]:
             if interface_name == interface["name"]:
-                found = True
-        return found
+                return True
+        return False
 
     def _validate_rx_msg(self, msg, interface_name):
         ok = self._is_valid_interface(interface_name)
@@ -410,7 +409,7 @@ class DMPR(object):
         if router_id not in self._rtd["interfaces"][iface_name]['rx-msg-db']:
             self.log.warning("cannot calculate next_hop_addr because router id is not in "
                              " databse (anymore!)? id:{}".format(router_id))
-            return None
+            return
         msg = self._rtd["interfaces"][iface_name]['rx-msg-db'][router_id]['msg']
         if proto == 'v4':
             return msg['originator-addr-v4']
