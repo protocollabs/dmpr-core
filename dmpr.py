@@ -271,6 +271,7 @@ class DMPR(object):
             'retracted': {}
         }
         self._seq_no = 0
+        self.update_required = False
 
     def stop(self):
         self._started = False
@@ -434,10 +435,8 @@ class DMPR(object):
 
         msg = self._preprocess_msg(interface, msg)
 
-        update_required = False
-
         if msg['id'] not in self.msg_db[interface]:
-            update_required = True
+            self.update_required = True
 
         db_entry = get_mutable_default(self.msg_db[interface], msg['id'], dict)
         db_entry['rx-time'] = self.now()
@@ -447,12 +446,13 @@ class DMPR(object):
         msg_entry['addr-v4'] = msg.get('addr-v4', None)
         msg_entry['addr-v6'] = msg.get('addr-v6', None)
 
-        update_required |= self._compare_and_save(msg_entry, msg, 'networks')
+        self.update_required |= self._compare_and_save(msg_entry, msg,
+                                                       'networks')
 
         if msg['routing-data']:
             for entry in ('link-attributes', 'node-data', 'routing-data'):
-                update_required |= self._compare_and_save(msg_entry, msg,
-                                                          entry)
+                self.update_required |= self._compare_and_save(msg_entry, msg,
+                                                               entry)
 
         elif 'partial-routing-data' in msg:
             pass  # TODO apply partial update, for later
@@ -462,9 +462,6 @@ class DMPR(object):
 
         if 'reflections' in msg:
             pass  # TODO process reflections, for later
-
-        if update_required:
-            self.recalculate_routing_data()
 
     def _get_default_msg(self):
         return {
@@ -754,9 +751,10 @@ in current | in retracted | msg retracted |
             return
         self.trace('tick', self.now())
 
-        recalc_required = self._clean_msg_db()
-        recalc_required = recalc_required or self._clean_networks()
-        if recalc_required:
+        self.update_required |= self._clean_msg_db()
+        self.update_required |= self._clean_networks()
+        if self.update_required:
+            self.update_required = False
             self.recalculate_routing_data()
 
         if self.now() >= self._next_tx_time:
