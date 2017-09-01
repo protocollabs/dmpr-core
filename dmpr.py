@@ -440,9 +440,12 @@ class DMPR(object):
             update_required = True
 
         db_entry = get_mutable_default(self.msg_db[interface], msg['id'], dict)
+        db_entry['rx-time'] = self.now()
+
         msg_entry = get_mutable_default(db_entry, 'msg', self._get_default_msg)
         msg_entry['seq'] = msg['seq']
-        db_entry['rx-time'] = self.now()
+        msg_entry['addr-v4'] = msg.get('addr-v4', None)
+        msg_entry['addr-v6'] = msg.get('addr-v6', None)
 
         update_required |= self._compare_and_save(msg_entry, msg, 'networks')
 
@@ -904,7 +907,10 @@ in current | in retracted | msg retracted |
 
     def _node_to_ip(self, interface: str, node: str, version: int) -> str:
         key = 'addr-v{}'.format(version)
-        return self.msg_db[interface][node]['msg'][key]
+        addr = self.msg_db[interface][node]['msg'][key]
+        if not addr:
+            raise KeyError("Address does not exist")
+        return addr
 
     def now(self) -> int:
         return self._get_time()
