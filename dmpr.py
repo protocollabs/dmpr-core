@@ -267,7 +267,7 @@ class DMPR(object):
         self.link_attributes = {}
         self.routing_table = {}
         self.networks = {
-            'current': set(),
+            'current': {},
             'retracted': {}
         }
         self._seq_no = 0
@@ -725,8 +725,8 @@ in current | in retracted | msg retracted |
                     # network_data = copy.deepcopy(network_data)
                     network_data.update({'retracted': True})
 
-                elif network not in current:
-                    current.add(network)
+                else:
+                    current[network] = self.now()
 
             result[network] = network_data
 
@@ -783,22 +783,35 @@ in current | in retracted | msg retracted |
     def _clean_networks(self) -> bool:
         """ Iterates over all retracted networks and
             purges all obsolete entries"""
+        update = False
         obsolete = []
         now = self.now()
-        hold_time = self._conf['retracted-prefix-hold-time']
+        retracted_hold_time = self._conf['retracted-prefix-hold-time']
+        hold_time = self._conf['rtn-msg-hold-time']
 
         for network, retracted in self.networks['retracted'].items():
             if retracted:
-                if retracted + hold_time < now:
+                if retracted + retracted_hold_time < now:
                     obsolete.append(network)
 
         if obsolete:
             self.trace('tick.obsolete.prefix', obsolete)
             for network in obsolete:
                 del self.networks['retracted'][network]
-            return True
+            update = True
 
-        return False
+        obsolete = []
+        for network, current in self.networks['current'].items():
+            if current + hold_time < now:
+                self.networks['retracted'][network] = now
+                obsolete.append(network)
+
+        if obsolete:
+            for network in obsolete:
+                del self.networks['current'][network]
+            update = True
+
+        return update
 
     #####################
     #  message tx path  #
