@@ -616,7 +616,7 @@ class DMPR(object):
                 try:
                     next_hop_ip = self._node_to_ip(
                         path.next_hop_interface,
-                        node, version)
+                        path.next_hop, version)
                 except KeyError:
                     msg = "node {node} advertises IPv{version} network but " \
                           "has no IPv{version} address"
