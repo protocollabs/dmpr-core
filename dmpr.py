@@ -630,7 +630,7 @@ class DMPR(object):
                 routing_table.append({
                     'proto': 'v{}'.format(version),
                     'prefix': prefix,
-                    'prefix-len': prefix,
+                    'prefix-len': prefix_len,
                     'next-hop': next_hop_ip,
                     'interface': path.next_hop_interface,
                 })
