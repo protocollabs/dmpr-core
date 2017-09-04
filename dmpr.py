@@ -659,7 +659,7 @@ class DMPR(object):
                                                          list)
                 neighbour_networks.append(msg['networks'])
 
-                routing_data = msg['routing-data'].get(policy.name, {})
+                routing_data = msg['routing-data'][policy]
                 for node, node_data in routing_data.items():
                     node_paths = get_mutable_default(paths, node, list)
                     node_paths.append(node_data['path'])
