@@ -341,7 +341,7 @@ class DMPR(object):
             raise ConfigurationException(msg)
 
         interfaces = config.get('interfaces', False)
-        if not (interfaces or isinstance(interfaces, list)):
+        if not isinstance(interfaces, list):
             msg = "No interface configured, a list of at least on is required"
             raise ConfigurationException(msg)
 
