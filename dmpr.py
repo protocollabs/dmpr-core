@@ -199,6 +199,7 @@ class AbstractPolicy:
 
     @staticmethod
     def with_path_cache(func):
+        @functools.wraps(func)
         def wrapper(self, path):
             if self.name in path.policy_cache:
                 return path.policy_cache[self.name]
@@ -206,6 +207,7 @@ class AbstractPolicy:
             metric = func(self, path)
             path.policy_cache[self.name] = metric
             return metric
+
         return wrapper
 
     def path_cmp_key(self, path: Path):
