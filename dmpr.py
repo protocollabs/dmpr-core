@@ -28,7 +28,7 @@ exa_conf = """
 """
 
 
-@functools.lru_cache(maxsize=2**10)
+@functools.lru_cache(maxsize=1024)
 def normalize_network(network):
     return str(ipaddress.ip_network(network, strict=False))
 
@@ -681,14 +681,13 @@ class DMPR(object):
 
         path.append(self._conf['id'], interface_name,
                     interface['link-attributes'])
-        # FIXME apply?
         return path
 
     def _merge_networks(self, networks: list) -> dict:
         """ Merges all networks, retracted status overwrites not retracted"""
         result = {}
-        for entry in networks:
-            for network, network_data in entry.items():
+        for item in networks:
+            for network, network_data in item.items():
                 if network not in result:
                     result[network] = network_data.copy()
 
