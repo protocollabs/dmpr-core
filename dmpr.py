@@ -716,9 +716,7 @@ in current | in retracted | msg retracted |
         retracted = self.networks['retracted']
 
         for network, network_data in networks.items():
-            msg_retracted = False
-            if isinstance(network_data, dict):
-                msg_retracted = network_data.get('retracted', False)
+            msg_retracted = network_data.get('retracted', False)
 
             if msg_retracted:
                 if network in retracted:
@@ -802,9 +800,8 @@ in current | in retracted | msg retracted |
         hold_time = self._conf['rtn-msg-hold-time']
 
         for network, retracted in self.networks['retracted'].items():
-            if retracted:
-                if retracted + retracted_hold_time < now:
-                    obsolete.append(network)
+            if retracted + retracted_hold_time < now:
+                obsolete.append(network)
 
         if obsolete:
             self.trace('tick.obsolete.prefix', obsolete)
