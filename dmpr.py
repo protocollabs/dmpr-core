@@ -563,7 +563,7 @@ class DMPR(object):
 
         self._routing_table_update()
 
-        self.trace('routes.recalc.before', {
+        self.trace('routes.recalc.after', {
             'routing-data': self.routing_data,
             'link-attributes': self.link_attributes,
             'networks': self.networks,
