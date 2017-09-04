@@ -491,9 +491,14 @@ class DMPR(object):
                             next_hop=node,
                             next_hop_interface=interface)
 
+                if self._conf['id'] in path.nodes:
+                    # Ignore routing loops
+                    invalid.append((policy, node))
+
                 path.append(self._conf['id'],
                             interface,
-                            self._conf['interfaces'][interface]['link-attributes'])
+                            self._conf['interfaces'][interface][
+                                'link-attributes'])
                 routing_data[policy][node]['path'] = path
 
         for policy, node in invalid:
