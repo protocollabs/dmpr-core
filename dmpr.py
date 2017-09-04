@@ -610,6 +610,9 @@ class DMPR(object):
                 if network in self.networks['retracted']:
                     # retracted network
                     continue
+                if node not in routing_data:
+                    continue
+
                 path = routing_data[node]['path']
 
                 if '.' in network:
