@@ -557,6 +557,10 @@ class DMPR(object):
             'routing-table': self.routing_table,
         })
 
+        self.link_attributes.clear()
+        self.routing_data.clear()
+        self.node_data.clear()
+
         for policy in self.policies:
             self._compute_routing_data(policy)
             self._compute_routing_table(policy)
