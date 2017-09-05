@@ -33,12 +33,6 @@ def normalize_network(network):
     return str(ipaddress.ip_network(network, strict=False))
 
 
-def get_mutable_default(dictionary: dict, key, default_factory):
-    if key not in dictionary:
-        dictionary[key] = default_factory()
-    return dictionary[key]
-
-
 def dict_reverse_lookup(d: dict, value):
     return list(d.keys())[list(d.values()).index(value)]
 
@@ -364,8 +358,7 @@ class DMPR(object):
                 raise ConfigurationException(msg)
             converted_interfaces[interface_data['name']] = interface_data
 
-            orig_attr = get_mutable_default(interface_data,
-                                            'link-attributes', dict)
+            orig_attr = interface_data.setdefault('link-attributes', {})
             attributes = copy.deepcopy(DMPRConfigDefaults.DEFAULT_ATTRIBUTES)
             attributes.update(orig_attr)
             interface_data['link-attributes'] = attributes
@@ -442,10 +435,10 @@ class DMPR(object):
         if msg['id'] not in self.msg_db[interface]:
             self.update_required = True
 
-        db_entry = get_mutable_default(self.msg_db[interface], msg['id'], dict)
+        db_entry = self.msg_db[interface].setdefault(msg['id'], {})
         db_entry['rx-time'] = self.now()
 
-        msg_entry = get_mutable_default(db_entry, 'msg', self._get_default_msg)
+        msg_entry = db_entry.setdefault('msg', self._get_default_msg())
         msg_entry['seq'] = msg['seq']
         msg_entry['addr-v4'] = msg.get('addr-v4', None)
         msg_entry['addr-v6'] = msg.get('addr-v6', None)
@@ -479,13 +472,13 @@ class DMPR(object):
         # Normalize network addresses
         self._convert_networks(msg)
 
-        node_data = get_mutable_default(msg, 'node-data', dict)
+        node_data = msg.setdefault('node-data', {})
         for node in node_data:
             self._convert_networks(node_data[node])
 
         # Replace string paths with Path instances
-        routing_data = get_mutable_default(msg, 'routing-data', dict)
-        link_attributes = get_mutable_default(msg, 'link-attributes', dict)
+        routing_data = msg.setdefault('routing-data', {})
+        link_attributes = msg.setdefault('link-attributes', {})
 
         invalid = []
         for policy in routing_data:
@@ -602,9 +595,8 @@ class DMPR(object):
             if not node_networks:
                 continue
 
-            node_entry = get_mutable_default(self.node_data, node, dict)
-            node_networks_entry = get_mutable_default(node_entry, 'networks',
-                                                      dict)
+            node_entry = self.node_data.setdefault(node, {})
+            node_networks_entry = node_entry.setdefault('networks', {})
             node_networks_entry.update(self._update_network_data(node_networks))
 
     def _compute_routing_table(self, policy):
@@ -655,21 +647,20 @@ class DMPR(object):
             for neighbour, neighbour_data in self.msg_db[interface].items():
                 msg = neighbour_data['msg']
 
-                neighbour_paths = get_mutable_default(paths, neighbour, list)
+                neighbour_paths = paths.setdefault(neighbour, [])
                 path = self._get_neighbour_path(interface, neighbour)
                 neighbour_paths.append(path)
 
-                neighbour_networks = get_mutable_default(networks, neighbour,
-                                                         list)
+                neighbour_networks = networks.setdefault(neighbour, [])
                 neighbour_networks.append(msg['networks'])
 
                 routing_data = msg['routing-data'].get(policy.name, {})
                 for node, node_data in routing_data.items():
-                    node_paths = get_mutable_default(paths, node, list)
+                    node_paths = paths.setdefault(node, [])
                     node_paths.append(node_data['path'])
 
                 for node, node_data in msg['node-data'].items():
-                    node_networks = get_mutable_default(networks, node, list)
+                    node_networks = networks.setdefault(node, [])
                     node_networks.append(node_data['networks'])
 
         return paths, networks
