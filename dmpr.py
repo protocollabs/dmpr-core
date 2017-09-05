@@ -28,15 +28,9 @@ exa_conf = """
 """
 
 
-@functools.lru_cache(maxsize=2**10)
+@functools.lru_cache(maxsize=1024)
 def normalize_network(network):
     return str(ipaddress.ip_network(network, strict=False))
-
-
-def get_mutable_default(dictionary: dict, key, default_factory):
-    if key not in dictionary:
-        dictionary[key] = default_factory()
-    return dictionary[key]
 
 
 def dict_reverse_lookup(d: dict, value):
@@ -199,6 +193,7 @@ class AbstractPolicy:
 
     @staticmethod
     def with_path_cache(func):
+        @functools.wraps(func)
         def wrapper(self, path):
             if self.name in path.policy_cache:
                 return path.policy_cache[self.name]
@@ -206,6 +201,7 @@ class AbstractPolicy:
             metric = func(self, path)
             path.policy_cache[self.name] = metric
             return metric
+
         return wrapper
 
     def path_cmp_key(self, path: Path):
@@ -236,8 +232,10 @@ class SimpleBandwidthPolicy(AbstractPolicy):
         return min(path.attributes[link]['bandwidth'] for link in path.links)
 
     @AbstractPolicy.with_path_cache
-    def path_cmp_key(self, path: Path) -> int:
-        return - self._acc_bw(path)
+    def path_cmp_key(self, path: Path):
+        # the minimum bandwidth of the path while slightly preferring
+        # shorter paths
+        return - self._acc_bw(path) * 0.99**len(path.links)
 
 
 class DMPR(object):
@@ -267,10 +265,11 @@ class DMPR(object):
         self.link_attributes = {}
         self.routing_table = {}
         self.networks = {
-            'current': set(),
+            'current': {},
             'retracted': {}
         }
         self._seq_no = 0
+        self.update_required = False
 
     def stop(self):
         self._started = False
@@ -340,7 +339,7 @@ class DMPR(object):
             raise ConfigurationException(msg)
 
         interfaces = config.get('interfaces', False)
-        if not (interfaces or isinstance(interfaces, list)):
+        if not isinstance(interfaces, list):
             msg = "No interface configured, a list of at least on is required"
             raise ConfigurationException(msg)
 
@@ -359,8 +358,7 @@ class DMPR(object):
                 raise ConfigurationException(msg)
             converted_interfaces[interface_data['name']] = interface_data
 
-            orig_attr = get_mutable_default(interface_data,
-                                            'link-attributes', dict)
+            orig_attr = interface_data.setdefault('link-attributes', {})
             attributes = copy.deepcopy(DMPRConfigDefaults.DEFAULT_ATTRIBUTES)
             attributes.update(orig_attr)
             interface_data['link-attributes'] = attributes
@@ -434,22 +432,24 @@ class DMPR(object):
 
         msg = self._preprocess_msg(interface, msg)
 
-        update_required = False
-
         if msg['id'] not in self.msg_db[interface]:
-            update_required = True
+            self.update_required = True
 
-        db_entry = get_mutable_default(self.msg_db[interface], msg['id'], dict)
-        msg_entry = get_mutable_default(db_entry, 'msg', self._get_default_msg)
-        msg_entry['seq'] = msg['seq']
+        db_entry = self.msg_db[interface].setdefault(msg['id'], {})
         db_entry['rx-time'] = self.now()
 
-        update_required |= self._compare_and_save(msg_entry, msg, 'networks')
+        msg_entry = db_entry.setdefault('msg', self._get_default_msg())
+        msg_entry['seq'] = msg['seq']
+        msg_entry['addr-v4'] = msg.get('addr-v4', None)
+        msg_entry['addr-v6'] = msg.get('addr-v6', None)
+
+        self.update_required |= self._compare_and_save(msg_entry, msg,
+                                                       'networks')
 
         if msg['routing-data']:
             for entry in ('link-attributes', 'node-data', 'routing-data'):
-                update_required |= self._compare_and_save(msg_entry, msg,
-                                                          entry)
+                self.update_required |= self._compare_and_save(msg_entry, msg,
+                                                               entry)
 
         elif 'partial-routing-data' in msg:
             pass  # TODO apply partial update, for later
@@ -459,9 +459,6 @@ class DMPR(object):
 
         if 'reflections' in msg:
             pass  # TODO process reflections, for later
-
-        if update_required:
-            self.recalculate_routing_data()
 
     def _get_default_msg(self):
         return {
@@ -475,13 +472,13 @@ class DMPR(object):
         # Normalize network addresses
         self._convert_networks(msg)
 
-        node_data = get_mutable_default(msg, 'node-data', dict)
+        node_data = msg.setdefault('node-data', {})
         for node in node_data:
             self._convert_networks(node_data[node])
 
         # Replace string paths with Path instances
-        routing_data = get_mutable_default(msg, 'routing-data', dict)
-        link_attributes = get_mutable_default(msg, 'link-attributes', dict)
+        routing_data = msg.setdefault('routing-data', {})
+        link_attributes = msg.setdefault('link-attributes', {})
 
         invalid = []
         for policy in routing_data:
@@ -491,9 +488,14 @@ class DMPR(object):
                             next_hop=node,
                             next_hop_interface=interface)
 
+                if self._conf['id'] in path.nodes:
+                    # Ignore routing loops
+                    invalid.append((policy, node))
+
                 path.append(self._conf['id'],
                             interface,
-                            self._conf['interfaces'][interface]['link-attributes'])
+                            self._conf['interfaces'][interface][
+                                'link-attributes'])
                 routing_data[policy][node]['path'] = path
 
         for policy, node in invalid:
@@ -552,13 +554,17 @@ class DMPR(object):
             'routing-table': self.routing_table,
         })
 
+        self.link_attributes.clear()
+        self.routing_data.clear()
+        self.node_data.clear()
+
         for policy in self.policies:
             self._compute_routing_data(policy)
             self._compute_routing_table(policy)
 
         self._routing_table_update()
 
-        self.trace('routes.recalc.before', {
+        self.trace('routes.recalc.after', {
             'routing-data': self.routing_data,
             'link-attributes': self.link_attributes,
             'networks': self.networks,
@@ -589,9 +595,8 @@ class DMPR(object):
             if not node_networks:
                 continue
 
-            node_entry = get_mutable_default(self.node_data, node, dict)
-            node_networks_entry = get_mutable_default(node_entry, 'networks',
-                                                      dict)
+            node_entry = self.node_data.setdefault(node, {})
+            node_networks_entry = node_entry.setdefault('networks', {})
             node_networks_entry.update(self._update_network_data(node_networks))
 
     def _compute_routing_table(self, policy):
@@ -605,6 +610,9 @@ class DMPR(object):
                 if network in self.networks['retracted']:
                     # retracted network
                     continue
+                if node not in routing_data:
+                    continue
+
                 path = routing_data[node]['path']
 
                 if '.' in network:
@@ -616,7 +624,7 @@ class DMPR(object):
                 try:
                     next_hop_ip = self._node_to_ip(
                         path.next_hop_interface,
-                        node, version)
+                        path.next_hop, version)
                 except KeyError:
                     msg = "node {node} advertises IPv{version} network but " \
                           "has no IPv{version} address"
@@ -627,7 +635,7 @@ class DMPR(object):
                 routing_table.append({
                     'proto': 'v{}'.format(version),
                     'prefix': prefix,
-                    'prefix-len': prefix,
+                    'prefix-len': prefix_len,
                     'next-hop': next_hop_ip,
                     'interface': path.next_hop_interface,
                 })
@@ -639,21 +647,20 @@ class DMPR(object):
             for neighbour, neighbour_data in self.msg_db[interface].items():
                 msg = neighbour_data['msg']
 
-                neighbour_paths = get_mutable_default(paths, neighbour, list)
+                neighbour_paths = paths.setdefault(neighbour, [])
                 path = self._get_neighbour_path(interface, neighbour)
                 neighbour_paths.append(path)
 
-                neighbour_networks = get_mutable_default(networks, neighbour,
-                                                         list)
+                neighbour_networks = networks.setdefault(neighbour, [])
                 neighbour_networks.append(msg['networks'])
 
                 routing_data = msg['routing-data'].get(policy.name, {})
                 for node, node_data in routing_data.items():
-                    node_paths = get_mutable_default(paths, node, list)
+                    node_paths = paths.setdefault(node, [])
                     node_paths.append(node_data['path'])
 
                 for node, node_data in msg['node-data'].items():
-                    node_networks = get_mutable_default(networks, node, list)
+                    node_networks = networks.setdefault(node, [])
                     node_networks.append(node_data['networks'])
 
         return paths, networks
@@ -667,14 +674,13 @@ class DMPR(object):
 
         path.append(self._conf['id'], interface_name,
                     interface['link-attributes'])
-        # FIXME apply?
         return path
 
     def _merge_networks(self, networks: list) -> dict:
         """ Merges all networks, retracted status overwrites not retracted"""
         result = {}
-        for entry in networks:
-            for network, network_data in entry.items():
+        for item in networks:
+            for network, network_data in item.items():
                 if network not in result:
                     result[network] = network_data.copy()
 
@@ -704,9 +710,7 @@ in current | in retracted | msg retracted |
         retracted = self.networks['retracted']
 
         for network, network_data in networks.items():
-            msg_retracted = False
-            if isinstance(network_data, dict):
-                msg_retracted = network_data.get('retracted', False)
+            msg_retracted = network_data.get('retracted', False)
 
             if msg_retracted:
                 if network in retracted:
@@ -725,8 +729,8 @@ in current | in retracted | msg retracted |
                     # network_data = copy.deepcopy(network_data)
                     network_data.update({'retracted': True})
 
-                elif network not in current:
-                    current.add(network)
+                else:
+                    current[network] = self.now()
 
             result[network] = network_data
 
@@ -751,9 +755,10 @@ in current | in retracted | msg retracted |
             return
         self.trace('tick', self.now())
 
-        recalc_required = self._clean_msg_db()
-        recalc_required = recalc_required or self._clean_networks()
-        if recalc_required:
+        self.update_required |= self._clean_msg_db()
+        self.update_required |= self._clean_networks()
+        if self.update_required:
+            self.update_required = False
             self.recalculate_routing_data()
 
         if self.now() >= self._next_tx_time:
@@ -782,22 +787,34 @@ in current | in retracted | msg retracted |
     def _clean_networks(self) -> bool:
         """ Iterates over all retracted networks and
             purges all obsolete entries"""
+        update = False
         obsolete = []
         now = self.now()
-        hold_time = self._conf['retracted-prefix-hold-time']
+        retracted_hold_time = self._conf['retracted-prefix-hold-time']
+        hold_time = self._conf['rtn-msg-hold-time']
 
         for network, retracted in self.networks['retracted'].items():
-            if retracted:
-                if retracted + hold_time < now:
-                    obsolete.append(network)
+            if retracted + retracted_hold_time < now:
+                obsolete.append(network)
 
         if obsolete:
             self.trace('tick.obsolete.prefix', obsolete)
             for network in obsolete:
                 del self.networks['retracted'][network]
-            return True
+            update = True
 
-        return False
+        obsolete = []
+        for network, current in self.networks['current'].items():
+            if current + hold_time < now:
+                self.networks['retracted'][network] = now
+                obsolete.append(network)
+
+        if obsolete:
+            for network in obsolete:
+                del self.networks['current'][network]
+            update = True
+
+        return update
 
     #####################
     #  message tx path  #
@@ -904,7 +921,10 @@ in current | in retracted | msg retracted |
 
     def _node_to_ip(self, interface: str, node: str, version: int) -> str:
         key = 'addr-v{}'.format(version)
-        return self.msg_db[interface][node]['msg'][key]
+        addr = self.msg_db[interface][node]['msg'][key]
+        if not addr:
+            raise KeyError("Address does not exist")
+        return addr
 
     def now(self) -> int:
         return self._get_time()
