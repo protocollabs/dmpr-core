@@ -11,6 +11,7 @@ exa_conf = """
     "rtn-msg-interval" : "30",
     "rtn-msg-interval-jitter" : "7",
     "rtn-msg-hold-time" : "90",
+    "max-full-update-interval": "10"
     "mcast-v4-tx-addr" : "224.0.1.1",
     "mcast-v6-tx-addr" : "ff05:0:0:0:0:0:0:2",
     "proto-transport-enable"  : [ "v4" ],
@@ -50,12 +51,14 @@ class DMPRConfigDefaults(object):
     rtn_msg_interval_jitter = rtn_msg_interval / 4
     rtn_msg_hold_time = rtn_msg_interval * 3
     retracted_prefix_hold_time = rtn_msg_interval * 12  # TODO TBD
+    max_full_update_interval = 10  # TODO TBD
 
     DEFAULT_CONFIG = {
         'rtn-msg-interval': rtn_msg_hold_time,
         'rtn-msg-interval-jitter': rtn_msg_interval_jitter,
         'rtn-msg-hold-time': rtn_msg_hold_time,
         'retracted-prefix-hold-time': retracted_prefix_hold_time,
+        'max-full-update-interval': max_full_update_interval,
     }
 
     # default bandwidth for a given interface in bytes/second
@@ -268,7 +271,8 @@ class DMPRState:
         # Message handling state
         self.next_tx_time = None
         self.request_full_update = []
-        self.send_full_update = False
+        self.next_full_update = 0
+        self.last_full_msg = {}
 
 
 class DMPR(object):
@@ -301,6 +305,7 @@ class DMPR(object):
             'retracted': {}
         }
         self.state = DMPRState()
+        self.state.next_full_update = self._conf['max-full-update-interval']
 
     def stop(self):
         self._started = False
@@ -396,7 +401,7 @@ class DMPR(object):
 
         networks = config.get('networks', False)
         if networks:
-            converted_networks = []
+            converted_networks = {}
             config['networks'] = converted_networks
 
             if not isinstance(networks, list):
@@ -421,7 +426,7 @@ class DMPR(object):
                     raise ConfigurationException(msg)
 
                 addr = '{}/{}'.format(network['prefix'], network['prefix-len'])
-                converted_networks.append(normalize_network(addr))
+                converted_networks[normalize_network(addr)] = False
 
         if "mcast-v4-tx-addr" not in config:
             msg = "no mcast-v4-tx-addr configured!"
@@ -553,7 +558,7 @@ class DMPR(object):
         old = msg_entry[name]
         new = msg[name]
 
-        if self._cmp_dicts(old, new):
+        if self._eq_dicts(old, new):
             return
 
         self.trace('rx.{}'.format(name), new)
@@ -678,7 +683,6 @@ class DMPR(object):
             node_paths = sorted(node_paths, key=policy.path_cmp_key)
             best_path = node_paths[0]
 
-            best_path.apply_attributes(self.link_attributes)
             routing_data[node] = {
                 'path': best_path
             }
@@ -930,9 +934,16 @@ in current | in retracted | msg retracted |
                                          msg)
 
     def _create_routing_msg(self, interface_name: str) -> dict:
+        if self.state.next_full_update <= 0:
+            return self._create_full_routing_msg(interface_name)
+        else:
+            return self._create_partial_routing_msg(interface_name)
+
+    def _create_full_routing_msg(self, interface_name: str) -> dict:
         packet = {
             'id': self._conf['id'],
             'seq': self.state.seq_no,
+            'type': 'full',
         }
 
         interface = self._conf['interfaces'][interface_name]
@@ -941,36 +952,118 @@ in current | in retracted | msg retracted |
         if 'addr-v6' in interface:
             packet['addr-v6'] = interface['addr-v6']
 
-        networks = self._conf['networks']
-        if networks:
-            packet['networks'] = dict()
-            for network in networks:
-                retracted = None
-                if network in self.networks['retracted']:
-                    retracted = {'retracted': True}
+        if self._conf['networks']:
+            packet['networks'] = self._prepare_networks()
 
-                packet['networks'][str(network)] = retracted
+        self.state.last_full_msg = packet.copy()
 
         if self.routing_data:
+            self.state.last_full_msg['routing-data'] = self.routing_data
             routing_data = self._prepare_routing_data()
             packet['routing-data'] = routing_data
         if self.node_data:
+            self.state.last_full_msg['node-data'] = self.node_data
             packet['node-data'] = self.node_data
         if self.link_attributes:
+            self.state.last_full_msg['link-attributes'] = self.link_attributes
             packet['link-attributes'] = self.link_attributes
 
+        self.state.last_full_msg.update({
+            'routing-data': self.routing_data,
+            'node-data': self.node_data,
+            'link-attributes': self.link_attributes,
+        })
+
+        request_full = self._prepare_full_requests()
+        if request_full:
+            packet['request-full'] = request_full
+
         return packet
+
+    def _create_partial_routing_msg(self, interface_name: str) -> dict:
+        """ create a partial update based on the last full message"""
+        packet = {
+            'id': self._conf['id'],
+            'seq': self.state.seq_no,
+            'type': 'partial',
+        }
+
+        base_msg = self.state.last_full_msg
+        packet['partial-base'] = base_msg['id']
+
+        interface = self._conf['interfaces'][interface_name]
+        for addr in ('addr-v4', 'addr-v6'):
+            if addr in interface:
+                if addr in base_msg:
+                    if interface[addr] != base_msg[addr]:
+                        packet[addr] = interface[addr]
+                else:
+                    packet[addr] = interface[addr]
+            else:
+                if addr in base_msg:
+                    packet[addr] = None
+
+        networks = self._prepare_networks()
+        if not self._eq_dicts(base_msg['networks'], networks):
+            packet['networks'] = networks
+
+        link_attributes = {}
+        routing_data = {}
+        for policy in self.routing_data:
+            base_msg_policy = base_msg.get('policy', {})
+            for node, node_data in self.routing_data[policy].items():
+                if node not in base_msg_policy or not self._eq_dicts(
+                        base_msg_policy[node], node_data):
+                    path = node_data['path']
+                    path.apply_attributes(link_attributes)
+                    routing_data.setdefault(policy, {})[node] = {
+                        'path': str(path)
+                    }
+        if routing_data:
+            packet['routing-data'] = routing_data
+            packet['link-attributes'] = link_attributes
+
+        node_data = {}
+        for node in self.node_data:
+            if node not in base_msg['node-data'] or not self._eq_dicts(
+                    base_msg['node-data'][node], self.node_data[node]):
+                node_data[node] = self.node_data[node]
+        if node_data:
+            packet['node-data'] = node_data
+
+        request_full = self._prepare_full_requests()
+        if request_full:
+            packet['request-full'] = request_full
+
+        return packet
+
+    def _prepare_networks(self) -> dict:
+        result = {}
+        networks = self._conf['networks']
+        for network in networks:
+            retracted = None
+            if networks[network]:
+                retracted = {'retracted': True}
+            result[network] = retracted
+        return result
 
     def _prepare_routing_data(self) -> dict:
         """ Replaces all occurences of a Path instance in routing_data
             with its string representation"""
         routing_data = copy.deepcopy(self.routing_data)
+        self.link_attributes = {}
         for policy in routing_data:
             for node in routing_data[policy]:
-                path = str(routing_data[policy][node]['path'])
-                routing_data[policy][node]['path'] = path
+                path = routing_data[policy][node]['path']
+                path.apply_attributes(self.link_attributes)
+                routing_data[policy][node]['path'] = str(path)
 
         return routing_data
+
+    def _prepare_full_requests(self):
+        if True in self.state.request_full_update:
+            return True
+        return self.state.request_full_update
 
     def _inc_seq_no(self):
         self.state.seq_no += 1
@@ -1030,7 +1123,7 @@ in current | in retracted | msg retracted |
         pass
 
     @classmethod
-    def _cmp_dicts(cls, dict1, dict2):
+    def _eq_dicts(cls, dict1, dict2):
         if dict1 is None or dict2 is None:
             return False
 
@@ -1042,7 +1135,7 @@ in current | in retracted | msg retracted |
 
         for key, value in dict1.items():
             if isinstance(value, dict):
-                if not cls._cmp_dicts(dict1[key], dict2[key]):
+                if not cls._eq_dicts(dict1[key], dict2[key]):
                     return False
             else:
                 if dict1[key] != dict2[key]:

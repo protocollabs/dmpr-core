@@ -13,7 +13,7 @@ class TestAuxMethods:
         }
 
     def test_cmp_dict_simple(self):
-        f = DMPR._cmp_dicts
+        f = DMPR._eq_dicts
 
         assert not f(None, None)
         assert f({}, {})
@@ -26,7 +26,7 @@ class TestAuxMethods:
         assert not f({1: {1: 1}}, {1: {2: 1}})
 
     def test_cmp_dict_deep(self):
-        f = DMPR._cmp_dicts
+        f = DMPR._eq_dicts
         dict1 = self.get_dict()
         dict2 = self.get_dict()
 
@@ -38,7 +38,7 @@ class TestAuxMethods:
         assert not f(dict1, dict2)
 
     def test_cmp_dict_deep_mutable(self):
-        f = DMPR._cmp_dicts
+        f = DMPR._eq_dicts
         dict1 = self.get_dict()
         dict2 = self.get_dict()
 
