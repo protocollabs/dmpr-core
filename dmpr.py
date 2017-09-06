@@ -267,7 +267,7 @@ class DMPRState:
 
         # Message handling state
         self.next_tx_time = None
-        self.request_full_update = False
+        self.request_full_update = []
         self.send_full_update = False
 
 
@@ -467,25 +467,17 @@ class DMPR(object):
         if new_neighbour:
             self.state.update_required = True
 
-        db_entry = self.msg_db[interface].setdefault(msg['id'], {})
+        db_entry = self.msg_db[interface].setdefault(msg['id'],
+                                                     self._get_default_db_entry())
         db_entry['rx-time'] = self.now()
 
-        msg_entry = db_entry.setdefault('msg', self._get_default_msg())
-        msg_entry['seq'] = msg['seq']
-        msg_entry['addr-v4'] = msg.get('addr-v4', None)
-        msg_entry['addr-v6'] = msg.get('addr-v6', None)
-
-        self.state.update_required |= self._compare_and_save(msg_entry, msg,
-                                                             'networks')
-
-        if msg['routing-data']:
-            for entry in ('link-attributes', 'node-data', 'routing-data'):
-                self.state.update_required |= self._compare_and_save(msg_entry,
-                                                                     msg,
-                                                                     entry)
-
-        elif 'partial-routing-data' in msg:
-            pass  # TODO apply partial update, for later
+        if msg['type'] == 'full':
+            self._save_full_update(msg, db_entry)
+        elif msg['type'] == 'partial':
+            if new_neighbour:
+                self.state.request_full_update.append(msg['id'])
+                return
+            self._save_partial_update(msg, db_entry)
 
         if 'reflector' in msg:
             pass  # TODO update reflector data, for later
@@ -500,6 +492,15 @@ class DMPR(object):
             'node-data': {},
             'networks': {},
             'routing-data': {},
+        }
+
+    @staticmethod
+    def _get_default_db_entry():
+        return {
+            'base_msg': {},
+            'msg': {},
+            'rx-time': float('-inf'),
+            'partial': {},
         }
 
     def _preprocess_msg(self, interface: str, msg: dict) -> dict:
@@ -553,12 +554,12 @@ class DMPR(object):
         new = msg[name]
 
         if self._cmp_dicts(old, new):
-            return False
+            return
 
         self.trace('rx.{}'.format(name), new)
         msg_entry[name] = new
 
-        return True
+        self.state.update_required = True
 
     def _validate_rx_msg(self, interface_name: str, msg: dict) -> bool:
         if interface_name not in self._conf['interfaces']:
@@ -576,6 +577,56 @@ class DMPR(object):
                 return False
 
         return True
+
+    def _save_full_update(self, msg: dict, db_entry: dict):
+        msg_entry = db_entry.setdefault('base_msg', self._get_default_msg())
+        db_entry['msg'] = msg_entry
+
+        msg_entry['seq'] = msg['seq']
+        msg_entry['addr-v4'] = msg.get('addr-v4', None)
+        msg_entry['addr-v6'] = msg.get('addr-v6', None)
+
+        self._compare_and_save(msg_entry, msg, 'networks')
+
+        if msg['routing-data']:
+            for entry in ('node-data', 'routing-data'):
+                self._compare_and_save(msg_entry, msg, entry)
+
+    def _save_partial_update(self, msg: dict, db_entry: dict):
+        base_msg = copy.deepcopy(db_entry['base_msg'])
+
+        if msg['partial-base'] != base_msg.get('seq'):
+            self.state.request_full_update.append(msg['id'])
+            return
+
+        partial = db_entry['partial']
+        # If older than newest partial update
+        if msg['seq'] < partial.get('seq', -1):
+            return
+
+        for entry in ('networks', 'node-data', 'routing-data'):
+            self._compare_and_save(partial, msg, entry)
+
+        # Apply network updates
+        if msg['networks']:
+            base_msg['networks'] = msg['networks']
+
+        # Apply path updates
+        for policy in msg['routing-data']:
+            for node, node_data in msg['routing-data'][policy].items():
+                base_msg['routing-data'][policy][node] = node_data
+
+        # Apply node updates
+        for node, node_data in msg['node-data']:
+            base_msg['node-data'][node] = node_data
+
+        # Update addresses
+        if 'addr-v4' in msg:
+            base_msg['addr-v4'] = msg['addr-v4']
+        if 'addr-v6' in msg:
+            base_msg['addr-v6'] = msg['addr-v6']
+
+        db_entry['msg'] = base_msg
 
     #######################
     #  Route Calculation  #
