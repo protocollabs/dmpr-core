@@ -567,6 +567,14 @@ class DMPR(object):
             self.log.warning(emsg.format(interface_name))
             return False
 
+        for i in ('id', 'seq', 'type'):
+            if i not in msg:
+                return False
+
+        if msg['type'] == 'partial':
+            if 'partial-base' not in msg:
+                return False
+
         if msg['id'] == self._conf['id']:
             self.log.warning("ignoring message from self")
             return False
