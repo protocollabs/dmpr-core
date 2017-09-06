@@ -135,7 +135,8 @@ class Path:
         self._global_attributes = {}
         self.policy_cache = {}
 
-    def _next_id(self, attributes: dict) -> str:
+    @staticmethod
+    def _next_id(attributes: dict) -> str:
         return str(int(max(attributes, key=int, default=0)) + 1)
 
     def append(self, node: str, new_next_hop_interface: str, attributes: dict):
@@ -213,7 +214,8 @@ class SimpleLossPolicy(AbstractPolicy):
     """ Route via the lowest-loss path"""
     name = 'lowest-loss'
 
-    def _acc_loss(self, path: Path) -> int:
+    @staticmethod
+    def _acc_loss(path: Path) -> int:
         loss = 0
         for link in path.links:
             loss += path.attributes[link]['loss']
@@ -228,7 +230,8 @@ class SimpleBandwidthPolicy(AbstractPolicy):
     """ Route via the highest-bandwidth path"""
     name = 'highest-bandwidth'
 
-    def _acc_bw(self, path: Path) -> int:
+    @staticmethod
+    def _acc_bw(path: Path) -> int:
         return min(path.attributes[link]['bandwidth'] for link in path.links)
 
     @AbstractPolicy.with_path_cache
@@ -460,7 +463,8 @@ class DMPR(object):
         if 'reflections' in msg:
             pass  # TODO process reflections, for later
 
-    def _get_default_msg(self):
+    @staticmethod
+    def _get_default_msg():
         return {
             'link-attributes': {},
             'node-data': {},
@@ -503,7 +507,8 @@ class DMPR(object):
 
         return msg
 
-    def _convert_networks(self, msg: dict):
+    @staticmethod
+    def _convert_networks(msg: dict):
         networks = msg.get('networks', {})
         converted_networks = {}
         for network, network_data in networks.items():
@@ -526,7 +531,7 @@ class DMPR(object):
         return True
 
     def _validate_rx_msg(self, interface_name: str, msg: dict) -> bool:
-        if not interface_name in self._conf['interfaces']:
+        if interface_name not in self._conf['interfaces']:
             emsg = "interface {} is not configured, ignoring message"
             self.log.warning(emsg.format(interface_name))
             return False
