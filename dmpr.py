@@ -241,6 +241,20 @@ class SimpleBandwidthPolicy(AbstractPolicy):
         return - self._acc_bw(path) * 0.99 ** len(path.links)
 
 
+class DMPRState:
+    def __init__(self):
+        # Router state
+        self.seq_no = 0
+
+        # routing data state
+        self.update_required = False
+
+        # Message handling state
+        self.next_tx_time = None
+        self.request_full_update = False
+        self.send_full_update = False
+
+
 class DMPR(object):
     def __init__(self, log=NoOpLogger(), tracer=NoOpTracer()):
         self.log = log
@@ -261,7 +275,6 @@ class DMPR(object):
     #######################################
 
     def _reset(self):
-        self._next_tx_time = None
         self.msg_db = {}
         self.routing_data = {}
         self.node_data = {}
@@ -271,8 +284,7 @@ class DMPR(object):
             'current': {},
             'retracted': {}
         }
-        self._seq_no = 0
-        self.update_required = False
+        self.state = DMPRState()
 
     def stop(self):
         self._started = False
@@ -435,8 +447,9 @@ class DMPR(object):
 
         msg = self._preprocess_msg(interface, msg)
 
-        if msg['id'] not in self.msg_db[interface]:
-            self.update_required = True
+        new_neighbour = msg['id'] not in self.msg_db[interface]
+        if new_neighbour:
+            self.state.update_required = True
 
         db_entry = self.msg_db[interface].setdefault(msg['id'], {})
         db_entry['rx-time'] = self.now()
@@ -446,13 +459,14 @@ class DMPR(object):
         msg_entry['addr-v4'] = msg.get('addr-v4', None)
         msg_entry['addr-v6'] = msg.get('addr-v6', None)
 
-        self.update_required |= self._compare_and_save(msg_entry, msg,
-                                                       'networks')
+        self.state.update_required |= self._compare_and_save(msg_entry, msg,
+                                                             'networks')
 
         if msg['routing-data']:
             for entry in ('link-attributes', 'node-data', 'routing-data'):
-                self.update_required |= self._compare_and_save(msg_entry, msg,
-                                                               entry)
+                self.state.update_required |= self._compare_and_save(msg_entry,
+                                                                     msg,
+                                                                     entry)
 
         elif 'partial-routing-data' in msg:
             pass  # TODO apply partial update, for later
@@ -761,13 +775,13 @@ in current | in retracted | msg retracted |
             return
         self.trace('tick', self.now())
 
-        self.update_required |= self._clean_msg_db()
-        self.update_required |= self._clean_networks()
-        if self.update_required:
-            self.update_required = False
+        self.state.update_required |= self._clean_msg_db()
+        self.state.update_required |= self._clean_networks()
+        if self.state.update_required:
+            self.state.update_required = False
             self.recalculate_routing_data()
 
-        if self.now() >= self._next_tx_time:
+        if self.now() >= self.state.next_tx_time:
             self.tx_route_packet()
             self._calc_next_tx_time()
 
@@ -843,7 +857,7 @@ in current | in retracted | msg retracted |
     def _create_routing_msg(self, interface_name: str) -> dict:
         packet = {
             'id': self._conf['id'],
-            'seq': self._seq_no,
+            'seq': self.state.seq_no,
         }
 
         interface = self._conf['interfaces'][interface_name]
@@ -884,20 +898,20 @@ in current | in retracted | msg retracted |
         return routing_data
 
     def _inc_seq_no(self):
-        self._seq_no += 1
+        self.state.seq_no += 1
 
     def _calc_next_tx_time(self):
         interval = self._conf["rtn-msg-interval"]
-        if self._next_tx_time is None:
+        if self.state.next_tx_time is None:
             # first time transmitting, just wait jitter to join network faster
             interval = 0
 
         jitter = self._conf["rtn-msg-interval-jitter"]
         wait_time = interval + random.random() * jitter
         now = self.now()
-        self._next_tx_time = now + wait_time
+        self.state.next_tx_time = now + wait_time
         self.log.debug("schedule next transmission for {} seconds".format(
-            self._next_tx_time), time=now)
+            self.state.next_tx_time), time=now)
 
     ###############
     #  Callbacks  #
