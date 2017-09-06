@@ -484,6 +484,9 @@ class DMPR(object):
                 return
             self._save_partial_update(msg, db_entry)
 
+        if 'request-full' in msg:
+            self._process_full_requests(msg)
+
         if 'reflector' in msg:
             pass  # TODO update reflector data, for later
 
@@ -640,6 +643,12 @@ class DMPR(object):
             base_msg['addr-v6'] = msg['addr-v6']
 
         db_entry['msg'] = base_msg
+
+    def _process_full_requests(self, msg):
+        request = msg['request-full']
+        if (isinstance(request, list) and self._conf['id'] in request) or \
+                request:
+            self.state.next_full_update = 0
 
     #######################
     #  Route Calculation  #
