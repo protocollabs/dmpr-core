@@ -104,5 +104,28 @@ class TestPath:
         assert str(path) == expected
 
 
+class TestMergeNetworks:
+    def test_simple(self):
+        networks = [{'1': {}, '2': {}, '3': {'retracted': True}}]
+        expected = {'1': {}, '2': {}, '3': {'retracted': True}}
+        result = DMPR._merge_networks(networks)
+        assert expected == result
+
+    def test_overwrite(self):
+        networks = [{'1': {}, '2': {}, '3': {'retracted': True}},
+                    {'1': {}, '2': {}, '3': {'retracted': False}}]
+        expected = {'1': {}, '2': {}, '3': {'retracted': True}}
+        result = DMPR._merge_networks(networks)
+        assert expected == result
+
+    def test_multi_overwrite(self):
+        networks = [{'1': {}, '2': {}, '3': {'retracted': True}},
+                    {'1': {}, '2': {}, '3': {'retracted': False}},
+                    {'1': {}, '2': {'retracted': True}, '3': {}}]
+        expected = {'1': {}, '2': {'retracted': True}, '3': {'retracted': True}}
+        result = DMPR._merge_networks(networks)
+        assert expected == result
+
+
 def test_init_dmpr():
     dmpr = DMPR(log=True)

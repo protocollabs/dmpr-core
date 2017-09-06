@@ -676,7 +676,8 @@ class DMPR(object):
                     interface['link-attributes'])
         return path
 
-    def _merge_networks(self, networks: list) -> dict:
+    @staticmethod
+    def _merge_networks(networks: list) -> dict:
         """ Merges all networks, retracted status overwrites not retracted"""
         result = {}
         for item in networks:
