@@ -181,6 +181,22 @@ class Path:
 
         return result
 
+    def __eq__(self, other):
+        if not isinstance(other, Path):
+            raise ValueError("cannot compare path to {}".format(type(other)))
+
+        if self.nodes != other.nodes:
+            return False
+        if (self.next_hop != other.next_hop or
+                    self.next_hop_interface != other.next_hop_interface):
+            return False
+
+        for self_link, other_link in zip(self.links, other.links):
+            if self.attributes[self_link] != other.attributes[other_link]:
+                return False
+
+        return True
+
 
 class AbstractPolicy:
     """ A policy implements all routing decisions by
