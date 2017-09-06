@@ -47,7 +47,7 @@ class InternalException(Exception):
 
 class DMPRConfigDefaults(object):
     rtn_msg_interval = 30
-    rtn_msg_interval_jitter = rtn_msg_interval // 4
+    rtn_msg_interval_jitter = rtn_msg_interval / 4
     rtn_msg_hold_time = rtn_msg_interval * 3
     retracted_prefix_hold_time = rtn_msg_interval * 12  # TODO TBD
 
@@ -887,7 +887,7 @@ in current | in retracted | msg retracted |
             interval = 0
 
         jitter = self._conf["rtn-msg-interval-jitter"]
-        wait_time = interval + random.randint(0, int(jitter))
+        wait_time = interval + random.random() * jitter
         now = self.now()
         self._next_tx_time = now + wait_time
         self.log.debug("schedule next transmission for {} seconds".format(
