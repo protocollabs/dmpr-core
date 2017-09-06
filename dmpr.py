@@ -235,7 +235,7 @@ class SimpleBandwidthPolicy(AbstractPolicy):
     def path_cmp_key(self, path: Path):
         # the minimum bandwidth of the path while slightly preferring
         # shorter paths
-        return - self._acc_bw(path) * 0.99**len(path.links)
+        return - self._acc_bw(path) * 0.99 ** len(path.links)
 
 
 class DMPR(object):
