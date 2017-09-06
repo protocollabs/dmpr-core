@@ -806,7 +806,6 @@ in current | in retracted | msg retracted |
         obsolete = []
         for network, current in self.networks['current'].items():
             if current + hold_time < now:
-                self.networks['retracted'][network] = now
                 obsolete.append(network)
 
         if obsolete:
