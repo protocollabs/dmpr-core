@@ -252,7 +252,6 @@ class Message(BaseMessage):
             return self._apply_partial(msg)
 
     def _validate_msg(self, msg: dict):
-        # TODO raise partial error, check addr not when partial
         # Check for essential fields
         for i in ('id', 'seq', 'type'):
             if i not in msg:
@@ -319,8 +318,8 @@ class Message(BaseMessage):
                 }
 
                 if node not in msg_node_data:
-                    # TODO error
-                    print("ERROR: node node_data for target {}".format(node))
+                    # We have no node_data for this node, apparently it does not
+                    # advertise any networks
                     continue
 
         if self.routing_data != new_routing_data:
@@ -374,7 +373,7 @@ class Message(BaseMessage):
             else:
                 self.node_data[node] = node_data[node]
 
-        return True  # FIXME add support for update detection
+        return True  # TODO add support for update detection
 
     def _save_networks(self, msg: dict) -> bool:
         networks = msg.get('networks')
@@ -675,7 +674,6 @@ class DMPR(object):
                 message = Message(msg, interface, self._conf['id'], self.now())
                 self.msg_db[interface_name][msg['id']] = message
                 self.state.update_required = True
-                # TODO request full when partial
             else:
                 message = self.msg_db[interface_name][msg['id']]
                 self.state.update_required |= message.apply_new_msg(msg,
