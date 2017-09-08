@@ -263,9 +263,9 @@ class DMPR(object):
         if 'id' not in msg:
             return
 
-        new_neighbour = msg['id'] not in self.msg_db[interface_name]
+        new_neighbor = msg['id'] not in self.msg_db[interface_name]
         try:
-            if new_neighbour:
+            if new_neighbor:
                 interface = self._conf['interfaces'][interface_name]
                 message = Message(msg, interface, self._conf['id'], self.now())
                 self.msg_db[interface_name][msg['id']] = message
@@ -349,7 +349,7 @@ class DMPR(object):
                 self.log.warning("No node data for target")
                 continue
 
-            # Merge all data of this node advertised by the different neighbours
+            # Merge all data of this node advertised by the different neighbors
             node_networks = self._merge_networks(networks[node])
 
             if not node_networks:
@@ -412,16 +412,16 @@ class DMPR(object):
         paths = {}
         networks = {}
         for interface in self.msg_db:
-            for neighbour, msg in self.msg_db[interface].items():
-                # Add the neighbour as path and node to our lists
-                neighbour_paths = paths.setdefault(neighbour, [])
-                path = self._get_neighbour_path(interface, neighbour)
-                neighbour_paths.append(path)
+            for neighbor, msg in self.msg_db[interface].items():
+                # Add the neighbor as path and node to our lists
+                neighbor_paths = paths.setdefault(neighbor, [])
+                path = self._get_neighbor_path(interface, neighbor)
+                neighbor_paths.append(path)
 
-                neighbour_networks = networks.setdefault(neighbour, [])
-                neighbour_networks.append(msg.networks)
+                neighbor_networks = networks.setdefault(neighbor, [])
+                neighbor_networks.append(msg.networks)
 
-                # Add all paths and nodes advertised by this neighbour
+                # Add all paths and nodes advertised by this neighbor
                 # to our list
                 routing_data = msg.routing_data.get(policy.name, {})
                 for node, node_data in routing_data.items():
@@ -434,14 +434,14 @@ class DMPR(object):
 
         return paths, networks
 
-    def _get_neighbour_path(self, interface_name: str, neighbour: str):
+    def _get_neighbor_path(self, interface_name: str, neighbor: str):
         """
-        Get the path to a direct neighbour
+        Get the path to a direct neighbor
         """
         interface = self._conf['interfaces'][interface_name]
-        path = Path(path=neighbour,
+        path = Path(path=neighbor,
                     attributes={},
-                    next_hop=neighbour,
+                    next_hop=neighbor,
                     next_hop_interface=interface_name)
 
         path.append(self._conf['id'], interface_name,
@@ -560,14 +560,14 @@ in current | in retracted | msg retracted |
         hold_time = self._conf['rtn-msg-hold-time']
 
         for interface in self.msg_db:
-            for neighbour, msg in self.msg_db[interface].items():
+            for neighbor, msg in self.msg_db[interface].items():
                 if msg.rx_time + hold_time < now:
-                    obsolete.append((interface, neighbour))
+                    obsolete.append((interface, neighbor))
 
         if obsolete:
             self.trace('tick.obsolete.msg', obsolete)
-            for interface, neighbour in obsolete:
-                del self.msg_db[interface][neighbour]
+            for interface, neighbor in obsolete:
+                del self.msg_db[interface][neighbor]
             return True
 
         return False
