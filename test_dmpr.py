@@ -13,7 +13,7 @@ class TestAuxMethods:
         }
 
     def test_cmp_dict_simple(self):
-        f = DMPR._cmp_dicts
+        f = DMPR._eq_dicts
 
         assert not f(None, None)
         assert f({}, {})
@@ -26,7 +26,7 @@ class TestAuxMethods:
         assert not f({1: {1: 1}}, {1: {2: 1}})
 
     def test_cmp_dict_deep(self):
-        f = DMPR._cmp_dicts
+        f = DMPR._eq_dicts
         dict1 = self.get_dict()
         dict2 = self.get_dict()
 
@@ -38,7 +38,7 @@ class TestAuxMethods:
         assert not f(dict1, dict2)
 
     def test_cmp_dict_deep_mutable(self):
-        f = DMPR._cmp_dicts
+        f = DMPR._eq_dicts
         dict1 = self.get_dict()
         dict2 = self.get_dict()
 
@@ -102,6 +102,59 @@ class TestPath:
         expected = expected.format(loss_10, loss_20)
 
         assert str(path) == expected
+
+    def test_eq(self):
+        path1 = self.get_path()
+        path2 = self.get_path()
+        path3 = self.get_path()
+        path4 = self.get_path()
+        path5 = self.get_path()
+        path6 = self.get_path()
+        path7 = self.get_path()
+
+        path3.append('X', 'wlan', {'loss': 2})
+        path4.append('X', 'tetra', {'loss': 2})
+        path5.append('X', 'wlan', {'loss': 3})
+        path6.append('Y', 'wlan', {'loss': 2})
+        path7.append('X', 'wlan', {'loss': 2})
+
+        assert path1 is not path2
+        assert path2 is not path3
+        assert path1 is not path3
+        assert path3 is not path4
+        assert path3 is not path7
+
+        assert path1 == path2
+        assert path1 != path3
+        assert path1 == path1
+        assert path3 == path3
+        assert path3 != path4
+        assert path3 != path5
+        assert path3 != path6
+        assert path3 == path7
+
+
+class TestMergeNetworks:
+    def test_simple(self):
+        networks = [{'1': {}, '2': {}, '3': {'retracted': True}}]
+        expected = {'1': {}, '2': {}, '3': {'retracted': True}}
+        result = DMPR._merge_networks(networks)
+        assert expected == result
+
+    def test_overwrite(self):
+        networks = [{'1': {}, '2': {}, '3': {'retracted': True}},
+                    {'1': {}, '2': {}, '3': {'retracted': False}}]
+        expected = {'1': {}, '2': {}, '3': {'retracted': True}}
+        result = DMPR._merge_networks(networks)
+        assert expected == result
+
+    def test_multi_overwrite(self):
+        networks = [{'1': {}, '2': {}, '3': {'retracted': True}},
+                    {'1': {}, '2': {}, '3': {'retracted': False}},
+                    {'1': {}, '2': {'retracted': True}, '3': {}}]
+        expected = {'1': {}, '2': {'retracted': True}, '3': {'retracted': True}}
+        result = DMPR._merge_networks(networks)
+        assert expected == result
 
 
 def test_init_dmpr():

@@ -11,6 +11,7 @@ exa_conf = """
     "rtn-msg-interval" : "30",
     "rtn-msg-interval-jitter" : "7",
     "rtn-msg-hold-time" : "90",
+    "max-full-update-interval": "10"
     "mcast-v4-tx-addr" : "224.0.1.1",
     "mcast-v6-tx-addr" : "ff05:0:0:0:0:0:0:2",
     "proto-transport-enable"  : [ "v4" ],
@@ -47,15 +48,17 @@ class InternalException(Exception):
 
 class DMPRConfigDefaults(object):
     rtn_msg_interval = 30
-    rtn_msg_interval_jitter = rtn_msg_interval // 4
+    rtn_msg_interval_jitter = rtn_msg_interval / 4
     rtn_msg_hold_time = rtn_msg_interval * 3
     retracted_prefix_hold_time = rtn_msg_interval * 12  # TODO TBD
+    max_full_update_interval = 0  # 0 => disables partial updates
 
     DEFAULT_CONFIG = {
         'rtn-msg-interval': rtn_msg_hold_time,
         'rtn-msg-interval-jitter': rtn_msg_interval_jitter,
         'rtn-msg-hold-time': rtn_msg_hold_time,
         'retracted-prefix-hold-time': retracted_prefix_hold_time,
+        'max-full-update-interval': max_full_update_interval,
     }
 
     # default bandwidth for a given interface in bytes/second
@@ -135,7 +138,8 @@ class Path:
         self._global_attributes = {}
         self.policy_cache = {}
 
-    def _next_id(self, attributes: dict) -> str:
+    @staticmethod
+    def _next_id(attributes: dict) -> str:
         return str(int(max(attributes, key=int, default=0)) + 1)
 
     def append(self, node: str, new_next_hop_interface: str, attributes: dict):
@@ -180,6 +184,219 @@ class Path:
 
         return result
 
+    def __eq__(self, other):
+        if not isinstance(other, Path):
+            raise ValueError("cannot compare path to {}".format(type(other)))
+
+        if self.nodes != other.nodes:
+            return False
+        if (self.next_hop != other.next_hop or
+                    self.next_hop_interface != other.next_hop_interface):
+            return False
+
+        for self_link, other_link in zip(self.links, other.links):
+            if self.attributes[self_link] != other.attributes[other_link]:
+                return False
+
+        return True
+
+
+class BaseMessage:
+    def __init__(self):
+        self.id = None
+        self.seq = float('-inf')
+        self.addr_v4 = None
+        self.addr_v6 = None
+
+        self.networks = {}
+        self.routing_data = {}
+        self.node_data = {}
+
+    def apply_base_data(self, msg):
+        self.id = msg.id
+        self.seq = msg.seq
+        self.addr_v4 = msg.addr_v4
+        self.addr_v6 = msg.addr_v6
+
+        self.networks = msg.networks
+        self.routing_data = msg.routing_data
+        self.node_data = msg.node_data
+
+
+class InvalidMessage(Exception):
+    pass
+
+
+class InvalidPartialUpdate(Exception):
+    pass
+
+
+class Message(BaseMessage):
+    def __init__(self, msg: dict, interface: dict, router_id: str, rx_time):
+        super(Message, self).__init__()
+        self._base = BaseMessage()
+
+        self.rx_time = rx_time
+        self.router_id = router_id
+        self.interface = interface
+        self.apply_new_msg(msg, rx_time)
+
+    def apply_new_msg(self, msg: dict, rx_time) -> bool:
+        self._validate_msg(msg)
+
+        self.rx_time = rx_time
+
+        if msg['type'] == 'full':
+            return self._apply_full(msg)
+        elif msg['type'] == 'partial':
+            return self._apply_partial(msg)
+
+    def _validate_msg(self, msg: dict):
+        # Check for essential fields
+        for i in ('id', 'seq', 'type'):
+            if i not in msg:
+                raise InvalidMessage("a message needs field {}".format(i))
+
+        if msg['id'] == self.router_id:
+            raise InvalidMessage("Message from self")
+
+        if msg['seq'] <= self.seq:
+            raise InvalidMessage("Old sequence number")
+
+        if msg['type'] == 'full':
+            # Check for at least one address
+            if not any(('addr-v4' in msg, 'addr-v6' in msg)):
+                raise InvalidMessage("Need one of add addr-v4 and addr-v6 in "
+                                     "message")
+
+        # Partial messages need a base
+        elif msg['type'] == 'partial':
+            if 'partial-base' not in msg:
+                raise InvalidMessage("Need a partial-base in partial updates")
+            if msg['partial-base'] != self._base.seq:
+                raise InvalidPartialUpdate("Wrong base message sequence number")
+
+        # If routing-data exists and there is at least one policy with paths
+        # then there must be link-attributes
+        # Also every policy value must be a dict
+        routing_data = msg.get('routing-data', {})
+        if routing_data and any(routing_data.values()):
+            if not msg.get('link-attributes'):
+                raise InvalidMessage("Need link-attributes for routing-data")
+            for i in routing_data.values():
+                if not isinstance(i, dict):
+                    raise InvalidMessage("routing-data policies must be dict")
+
+        for i in ('routing-data', 'node-data', 'link-attributes'):
+            if i in msg:
+                if not isinstance(msg[i], dict):
+                    raise InvalidMessage("{} must be dict".format(i))
+
+    def _apply_full(self, msg: dict) -> bool:
+        update = False
+        self.seq = msg['seq']
+        self.addr_v4 = msg.get('addr-v4', None)
+        self.addr_v6 = msg.get('addr-v6', None)
+
+        update |= self._save_networks(msg)
+
+        msg_routing_data = msg.get('routing-data', {})
+        msg_link_attributes = msg.get('link-attributes', {})
+        msg_node_data = msg.get('node-data', {})
+        new_routing_data = {}
+        for policy in msg_routing_data:
+            new_routing_data[policy] = {}
+            for node in msg_routing_data[policy]:
+                path = self._get_path(msg_routing_data[policy][node]['path'],
+                                      msg_link_attributes)
+                if not path:
+                    # Loop detection
+                    continue
+
+                new_routing_data[policy][node] = {
+                    'path': path,
+                }
+
+                if node not in msg_node_data:
+                    # We have no node_data for this node, apparently it does not
+                    # advertise any networks
+                    continue
+
+        if self.routing_data != new_routing_data:
+            update = True
+            self.routing_data = new_routing_data
+
+        if self.node_data != msg_node_data:
+            update = True
+            self.node_data = msg_node_data
+
+        self._base = BaseMessage()
+        self._base.apply_base_data(self)
+
+        return update
+
+    def _apply_partial(self, msg: dict) -> bool:
+        self.seq = msg['seq']
+        self.addr_v4 = msg.get('addr_v4', self._base.addr_v4)
+        self.addr_v6 = msg.get('addr_v6', self._base.addr_v6)
+
+        if 'networks' in msg:
+            self.networks = msg.get('networks', {})
+        else:
+            self.networks = self._base.networks
+
+        self.routing_data = copy.deepcopy(self._base.routing_data)
+        routing_data = msg.get('routing-data', {})
+        for policy in routing_data:
+            for node in routing_data[policy]:
+                if routing_data[policy][node] is None:
+                    if node in self.routing_data[policy]:
+                        del self.routing_data[policy][node]
+                else:
+                    path = self._get_path(routing_data[policy][node]['path'],
+                                          msg.get('link-attributes', {}))
+                    if not path:
+                        # Routing loop
+                        continue
+                    self.routing_data[policy][node] = {
+                        'path': path
+                    }
+
+        self.node_data = copy.deepcopy(self._base.node_data)
+        node_data = msg.get('node-data', {})
+        for node in node_data:
+            if node == self.router_id:
+                continue
+            if node_data[node] is None:
+                if node in self.node_data:
+                    del self.node_data[node]
+            else:
+                self.node_data[node] = node_data[node]
+
+        return True  # TODO add support for update detection
+
+    def _save_networks(self, msg: dict) -> bool:
+        networks = msg.get('networks')
+        if networks != self.networks:
+            self.networks = networks
+            return True
+        return False
+
+    def _get_path(self, path: str, link_attributes: dict) -> Path:
+        path = Path(path=path,
+                    attributes=link_attributes,
+                    next_hop='',
+                    next_hop_interface=self.interface['name'])
+
+        if self.router_id in path.nodes:
+            return False
+
+        path.append(self.router_id,
+                    self.interface['name'],
+                    self.interface['link-attributes'])
+
+        return path
+
 
 class AbstractPolicy:
     """ A policy implements all routing decisions by
@@ -213,7 +430,8 @@ class SimpleLossPolicy(AbstractPolicy):
     """ Route via the lowest-loss path"""
     name = 'lowest-loss'
 
-    def _acc_loss(self, path: Path) -> int:
+    @staticmethod
+    def _acc_loss(path: Path) -> int:
         loss = 0
         for link in path.links:
             loss += path.attributes[link]['loss']
@@ -228,14 +446,30 @@ class SimpleBandwidthPolicy(AbstractPolicy):
     """ Route via the highest-bandwidth path"""
     name = 'highest-bandwidth'
 
-    def _acc_bw(self, path: Path) -> int:
+    @staticmethod
+    def _acc_bw(path: Path) -> int:
         return min(path.attributes[link]['bandwidth'] for link in path.links)
 
     @AbstractPolicy.with_path_cache
     def path_cmp_key(self, path: Path):
         # the minimum bandwidth of the path while slightly preferring
         # shorter paths
-        return - self._acc_bw(path) * 0.99**len(path.links)
+        return - self._acc_bw(path) * 0.99 ** len(path.links)
+
+
+class DMPRState:
+    def __init__(self):
+        # Router state
+        self.seq_no = 0
+
+        # routing data state
+        self.update_required = False
+
+        # Message handling state
+        self.next_tx_time = None
+        self.request_full_update = [True]
+        self.next_full_update = 0
+        self.last_full_msg = {}
 
 
 class DMPR(object):
@@ -258,18 +492,16 @@ class DMPR(object):
     #######################################
 
     def _reset(self):
-        self._next_tx_time = None
         self.msg_db = {}
         self.routing_data = {}
         self.node_data = {}
-        self.link_attributes = {}
         self.routing_table = {}
         self.networks = {
             'current': {},
             'retracted': {}
         }
-        self._seq_no = 0
-        self.update_required = False
+        self.state = DMPRState()
+        self.state.next_full_update = 0
 
     def stop(self):
         self._started = False
@@ -365,7 +597,7 @@ class DMPR(object):
 
         networks = config.get('networks', False)
         if networks:
-            converted_networks = []
+            converted_networks = {}
             config['networks'] = converted_networks
 
             if not isinstance(networks, list):
@@ -390,7 +622,7 @@ class DMPR(object):
                     raise ConfigurationException(msg)
 
                 addr = '{}/{}'.format(network['prefix'], network['prefix-len'])
-                converted_networks.append(normalize_network(addr))
+                converted_networks[normalize_network(addr)] = False
 
         if "mcast-v4-tx-addr" not in config:
             msg = "no mcast-v4-tx-addr configured!"
@@ -422,37 +654,39 @@ class DMPR(object):
     #  dmpr rx path  #
     ##################
 
-    def msg_rx(self, interface: str, msg: dict):
+    def msg_rx(self, interface_name: str, msg: dict):
         """receive routing packet, triggers all recalculations"""
 
         self.trace('rx.msg', msg)
 
-        if not self._validate_rx_msg(interface, msg):
+        if interface_name not in self._conf['interfaces']:
+            emsg = "interface {} is not configured, ignoring message"
+            self.log.warning(emsg.format(interface_name))
             return
 
-        msg = self._preprocess_msg(interface, msg)
+        if 'id' not in msg:
+            return
 
-        if msg['id'] not in self.msg_db[interface]:
-            self.update_required = True
+        new_neighbour = msg['id'] not in self.msg_db[interface_name]
+        try:
+            if new_neighbour:
+                interface = self._conf['interfaces'][interface_name]
+                message = Message(msg, interface, self._conf['id'], self.now())
+                self.msg_db[interface_name][msg['id']] = message
+                self.state.update_required = True
+            else:
+                message = self.msg_db[interface_name][msg['id']]
+                self.state.update_required |= message.apply_new_msg(msg,
+                                                                    self.now())
+        except InvalidMessage as e:
+            self.log.debug("rx invalid message: {}".format(e))
+            return
+        except InvalidPartialUpdate:
+            self.state.request_full_update.append(msg['id'])
+            return
 
-        db_entry = self.msg_db[interface].setdefault(msg['id'], {})
-        db_entry['rx-time'] = self.now()
-
-        msg_entry = db_entry.setdefault('msg', self._get_default_msg())
-        msg_entry['seq'] = msg['seq']
-        msg_entry['addr-v4'] = msg.get('addr-v4', None)
-        msg_entry['addr-v6'] = msg.get('addr-v6', None)
-
-        self.update_required |= self._compare_and_save(msg_entry, msg,
-                                                       'networks')
-
-        if msg['routing-data']:
-            for entry in ('link-attributes', 'node-data', 'routing-data'):
-                self.update_required |= self._compare_and_save(msg_entry, msg,
-                                                               entry)
-
-        elif 'partial-routing-data' in msg:
-            pass  # TODO apply partial update, for later
+        if 'request-full' in msg:
+            self._process_full_requests(msg)
 
         if 'reflector' in msg:
             pass  # TODO update reflector data, for later
@@ -460,87 +694,11 @@ class DMPR(object):
         if 'reflections' in msg:
             pass  # TODO process reflections, for later
 
-    def _get_default_msg(self):
-        return {
-            'link-attributes': {},
-            'node-data': {},
-            'networks': {},
-            'routing-data': {},
-        }
-
-    def _preprocess_msg(self, interface: str, msg: dict) -> dict:
-        # Normalize network addresses
-        self._convert_networks(msg)
-
-        node_data = msg.setdefault('node-data', {})
-        for node in node_data:
-            self._convert_networks(node_data[node])
-
-        # Replace string paths with Path instances
-        routing_data = msg.setdefault('routing-data', {})
-        link_attributes = msg.setdefault('link-attributes', {})
-
-        invalid = []
-        for policy in routing_data:
-            for node in routing_data[policy]:
-                path = Path(path=routing_data[policy][node]['path'],
-                            attributes=link_attributes,
-                            next_hop=node,
-                            next_hop_interface=interface)
-
-                if self._conf['id'] in path.nodes:
-                    # Ignore routing loops
-                    invalid.append((policy, node))
-
-                path.append(self._conf['id'],
-                            interface,
-                            self._conf['interfaces'][interface][
-                                'link-attributes'])
-                routing_data[policy][node]['path'] = path
-
-        for policy, node in invalid:
-            del routing_data[policy][node]
-
-        return msg
-
-    def _convert_networks(self, msg: dict):
-        networks = msg.get('networks', {})
-        converted_networks = {}
-        for network, network_data in networks.items():
-            address = normalize_network(network)
-            if network_data is None:
-                network_data = {}
-            converted_networks[address] = network_data
-        msg['networks'] = converted_networks
-
-    def _compare_and_save(self, msg_entry, msg, name):
-        old = msg_entry[name]
-        new = msg[name]
-
-        if self._cmp_dicts(old, new):
-            return False
-
-        self.trace('rx.{}'.format(name), new)
-        msg_entry[name] = new
-
-        return True
-
-    def _validate_rx_msg(self, interface_name: str, msg: dict) -> bool:
-        if not interface_name in self._conf['interfaces']:
-            emsg = "interface {} is not configured, ignoring message"
-            self.log.warning(emsg.format(interface_name))
-            return False
-
-        if msg['id'] == self._conf['id']:
-            self.log.warning("ignoring message from self")
-            return False
-
-        old_msg = self.msg_db[interface_name].get(msg['id'], False)
-        if old_msg:
-            if msg['seq'] <= old_msg['msg']['seq']:
-                return False
-
-        return True
+    def _process_full_requests(self, msg: dict):
+        request = msg['request-full']
+        if (isinstance(request, list) and self._conf['id'] in request) or \
+                (isinstance(request, bool) and request):
+            self.state.next_full_update = 0
 
     #######################
     #  Route Calculation  #
@@ -549,14 +707,12 @@ class DMPR(object):
     def recalculate_routing_data(self):
         self.trace('routes.recalc.before', {
             'routing-data': self.routing_data,
-            'link-attributes': self.link_attributes,
             'networks': self.networks,
             'routing-table': self.routing_table,
         })
 
-        self.link_attributes.clear()
-        self.routing_data.clear()
-        self.node_data.clear()
+        self.routing_data = {}
+        self.node_data = {}
 
         for policy in self.policies:
             self._compute_routing_data(policy)
@@ -566,7 +722,6 @@ class DMPR(object):
 
         self.trace('routes.recalc.after', {
             'routing-data': self.routing_data,
-            'link-attributes': self.link_attributes,
             'networks': self.networks,
             'routing-table': self.routing_table,
         })
@@ -584,13 +739,13 @@ class DMPR(object):
             node_paths = sorted(node_paths, key=policy.path_cmp_key)
             best_path = node_paths[0]
 
-            best_path.apply_attributes(self.link_attributes)
             routing_data[node] = {
                 'path': best_path
             }
-
-        for node, node_networks in networks.items():
-            node_networks = self._merge_networks(node_networks)
+            if node not in networks:
+                self.log.warning("No node data for target")
+                continue
+            node_networks = self._merge_networks(networks[node])
 
             if not node_networks:
                 continue
@@ -640,26 +795,24 @@ class DMPR(object):
                     'interface': path.next_hop_interface,
                 })
 
-    def _parse_msg_db(self, policy) -> tuple:
+    def _parse_msg_db(self, policy: AbstractPolicy) -> tuple:
         paths = {}
         networks = {}
         for interface in self.msg_db:
-            for neighbour, neighbour_data in self.msg_db[interface].items():
-                msg = neighbour_data['msg']
-
+            for neighbour, msg in self.msg_db[interface].items():
                 neighbour_paths = paths.setdefault(neighbour, [])
                 path = self._get_neighbour_path(interface, neighbour)
                 neighbour_paths.append(path)
 
                 neighbour_networks = networks.setdefault(neighbour, [])
-                neighbour_networks.append(msg['networks'])
+                neighbour_networks.append(msg.networks)
 
-                routing_data = msg['routing-data'].get(policy.name, {})
+                routing_data = msg.routing_data.get(policy.name, {})
                 for node, node_data in routing_data.items():
                     node_paths = paths.setdefault(node, [])
                     node_paths.append(node_data['path'])
 
-                for node, node_data in msg['node-data'].items():
+                for node, node_data in msg.node_data.items():
                     node_networks = networks.setdefault(node, [])
                     node_networks.append(node_data['networks'])
 
@@ -676,11 +829,14 @@ class DMPR(object):
                     interface['link-attributes'])
         return path
 
-    def _merge_networks(self, networks: list) -> dict:
+    @staticmethod
+    def _merge_networks(networks: list) -> dict:
         """ Merges all networks, retracted status overwrites not retracted"""
         result = {}
         for item in networks:
             for network, network_data in item.items():
+                if network_data is None:
+                    network_data = {}
                 if network not in result:
                     result[network] = network_data.copy()
 
@@ -755,13 +911,13 @@ in current | in retracted | msg retracted |
             return
         self.trace('tick', self.now())
 
-        self.update_required |= self._clean_msg_db()
-        self.update_required |= self._clean_networks()
-        if self.update_required:
-            self.update_required = False
+        self.state.update_required |= self._clean_msg_db()
+        self.state.update_required |= self._clean_networks()
+        if self.state.update_required:
+            self.state.update_required = False
             self.recalculate_routing_data()
 
-        if self.now() >= self._next_tx_time:
+        if self.now() >= self.state.next_tx_time:
             self.tx_route_packet()
             self._calc_next_tx_time()
 
@@ -773,7 +929,7 @@ in current | in retracted | msg retracted |
 
         for interface in self.msg_db:
             for neighbour, msg in self.msg_db[interface].items():
-                if msg['rx-time'] + hold_time < now:
+                if msg.rx_time + hold_time < now:
                     obsolete.append((interface, neighbour))
 
         if obsolete:
@@ -806,7 +962,6 @@ in current | in retracted | msg retracted |
         obsolete = []
         for network, current in self.networks['current'].items():
             if current + hold_time < now:
-                self.networks['retracted'][network] = now
                 obsolete.append(network)
 
         if obsolete:
@@ -836,9 +991,18 @@ in current | in retracted | msg retracted |
                                          msg)
 
     def _create_routing_msg(self, interface_name: str) -> dict:
+        if self.state.next_full_update <= 0:
+            self.state.next_full_update = self._conf['max-full-update-interval']
+            return self._create_full_routing_msg(interface_name)
+        else:
+            self.state.next_full_update -= 1
+            return self._create_partial_routing_msg(interface_name)
+
+    def _create_full_routing_msg(self, interface_name: str) -> dict:
         packet = {
             'id': self._conf['id'],
-            'seq': self._seq_no,
+            'seq': self.state.seq_no,
+            'type': 'full',
         }
 
         interface = self._conf['interfaces'][interface_name]
@@ -847,52 +1011,164 @@ in current | in retracted | msg retracted |
         if 'addr-v6' in interface:
             packet['addr-v6'] = interface['addr-v6']
 
-        networks = self._conf['networks']
-        if networks:
-            packet['networks'] = dict()
-            for network in networks:
-                retracted = None
-                if network in self.networks['retracted']:
-                    retracted = {'retracted': True}
+        if self._conf['networks']:
+            packet['networks'] = self._prepare_networks()
 
-                packet['networks'][str(network)] = retracted
+        # The new base message for partial updates
+        next_base = packet.copy()
 
         if self.routing_data:
-            routing_data = self._prepare_routing_data()
-            packet['routing-data'] = routing_data
-        if self.node_data:
-            packet['node-data'] = self.node_data
-        if self.link_attributes:
-            packet['link-attributes'] = self.link_attributes
+            routing_data = {}
+            node_data = {}
+            link_attributes = {}
+
+            # We need to separate the routing data for the new base message
+            # because we need to be able to compare two entries, which is
+            # easier to do when the path is not a string but a Path instance
+            next_base_routing_data = {}
+
+            for policy in self.routing_data:
+                for node in self.routing_data[policy]:
+                    path = self.routing_data[policy][node]['path']
+                    path.apply_attributes(link_attributes)
+                    routing_data.setdefault(policy, {})[node] = {
+                        'path': str(path),
+                    }
+                    next_base_routing_data.setdefault(policy, {})[node] = {
+                        'path': path,
+                    }
+
+                    if node not in node_data:
+                        node_data[node] = self.node_data[node]
+
+            packet.update({
+                'routing-data': routing_data,
+                'node-data': node_data,
+                'link-attributes': link_attributes,
+            })
+            next_base.update({
+                'routing-data': next_base_routing_data,
+                'node-data': node_data,
+            })
+
+        self.state.last_full_msg = next_base
+
+        request_full = self._prepare_full_requests()
+        if request_full:
+            packet['request-full'] = request_full
 
         return packet
 
-    def _prepare_routing_data(self) -> dict:
-        """ Replaces all occurences of a Path instance in routing_data
-            with its string representation"""
-        routing_data = copy.deepcopy(self.routing_data)
-        for policy in routing_data:
-            for node in routing_data[policy]:
-                path = str(routing_data[policy][node]['path'])
-                routing_data[policy][node]['path'] = path
+    def _create_partial_routing_msg(self, interface_name: str) -> dict:
+        """ create a partial update based on the last full message"""
+        packet = {
+            'id': self._conf['id'],
+            'seq': self.state.seq_no,
+            'type': 'partial',
+        }
 
-        return routing_data
+        base_msg = self.state.last_full_msg
+        packet['partial-base'] = base_msg['seq']
+
+        interface = self._conf['interfaces'][interface_name]
+        for addr in ('addr-v4', 'addr-v6'):
+            if addr in interface:
+                if addr in base_msg:
+                    if interface[addr] != base_msg[addr]:
+                        packet[addr] = interface[addr]
+                else:
+                    packet[addr] = interface[addr]
+            else:
+                if addr in base_msg:
+                    packet[addr] = None
+
+        networks = self._prepare_networks()
+        if not self._eq_dicts(base_msg['networks'], networks):
+            packet['networks'] = networks
+
+        link_attributes = {}
+        routing_data = {}
+        base_routing_data = base_msg.get('routing-data', {})
+        # Check for new or updated routes
+        for policy in self.routing_data:
+            base_msg_policy = base_routing_data.get(policy, {})
+            for node, node_data in self.routing_data[policy].items():
+                if node not in base_msg_policy or not self._eq_dicts(
+                        base_msg_policy[node], node_data):
+                    path = node_data['path']
+                    path.apply_attributes(link_attributes)
+                    routing_data.setdefault(policy, {})[node] = {
+                        'path': str(path)
+                    }
+        # Check for deleted routes
+        for policy in base_routing_data:
+            for node in base_routing_data[policy]:
+                if node not in self.routing_data.get(policy, {}):
+                    routing_data.setdefault(policy, {})[node] = None
+        # Save routing data in packet
+        if routing_data:
+            packet['routing-data'] = routing_data
+            packet['link-attributes'] = link_attributes
+
+        required_nodes = {node for policy in routing_data for node in
+                          routing_data[policy] if
+                          routing_data[policy][node] is not None}
+        node_data = {}
+        base_node_data = base_msg.get('node-data', {})
+        # Check for new nodes
+        for node in required_nodes:
+            if node not in base_node_data or \
+                            base_node_data[node] != self.node_data.get(node):
+                node_data[node] = self.node_data[node]
+        # Check for updated nodes or deleted nodes
+        for node in base_node_data:
+            if node not in self.node_data:
+                node_data[node] = None
+            elif base_node_data[node] != self.node_data[node]:
+                node_data[node] = self.node_data[node]
+        # Save node data in packet
+        if node_data:
+            packet['node-data'] = node_data
+
+        request_full = self._prepare_full_requests()
+        if request_full:
+            packet['request-full'] = request_full
+
+        return packet
+
+    def _prepare_networks(self) -> dict:
+        result = {}
+        networks = self._conf['networks']
+        for network in networks:
+            retracted = None
+            if networks[network]:
+                retracted = {'retracted': True}
+            result[network] = retracted
+        return result
+
+    def _prepare_full_requests(self):
+        if True in self.state.request_full_update:
+            result = True
+        else:
+            result = list(set(self.state.request_full_update))
+        self.state.request_full_update = []
+        return result
 
     def _inc_seq_no(self):
-        self._seq_no += 1
+        self.state.seq_no += 1
 
     def _calc_next_tx_time(self):
         interval = self._conf["rtn-msg-interval"]
-        if self._next_tx_time is None:
+        if self.state.next_tx_time is None:
             # first time transmitting, just wait jitter to join network faster
             interval = 0
 
         jitter = self._conf["rtn-msg-interval-jitter"]
-        wait_time = interval + random.randint(0, int(jitter))
+        wait_time = interval + random.random() * jitter
         now = self.now()
-        self._next_tx_time = now + wait_time
+        self.state.next_tx_time = now + wait_time
         self.log.debug("schedule next transmission for {} seconds".format(
-            self._next_tx_time), time=now)
+            self.state.next_tx_time), time=now)
 
     ###############
     #  Callbacks  #
@@ -920,8 +1196,8 @@ in current | in retracted | msg retracted |
     ###########
 
     def _node_to_ip(self, interface: str, node: str, version: int) -> str:
-        key = 'addr-v{}'.format(version)
-        addr = self.msg_db[interface][node]['msg'][key]
+        key = 'addr_v{}'.format(version)
+        addr = getattr(self.msg_db[interface][node], key)
         if not addr:
             raise KeyError("Address does not exist")
         return addr
@@ -936,7 +1212,8 @@ in current | in retracted | msg retracted |
         pass
 
     @classmethod
-    def _cmp_dicts(cls, dict1, dict2):
+    def _eq_dicts(cls, dict1, dict2):
+        return dict1 == dict2
         if dict1 is None or dict2 is None:
             return False
 
@@ -948,7 +1225,7 @@ in current | in retracted | msg retracted |
 
         for key, value in dict1.items():
             if isinstance(value, dict):
-                if not cls._cmp_dicts(dict1[key], dict2[key]):
+                if not cls._eq_dicts(dict1[key], dict2[key]):
                     return False
             else:
                 if dict1[key] != dict2[key]:
