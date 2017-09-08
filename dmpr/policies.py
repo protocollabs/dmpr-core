@@ -3,10 +3,12 @@ import functools
 from .path import Path
 
 
-class AbstractPolicy:
-    """ A policy implements all routing decisions by
-        providing comparison methods for interfaces
-        and paths"""
+class AbstractPolicy(object):
+    """
+    A policy implements all routing decisions by
+    providing comparison methods for interfaces
+    and paths
+    """
     name = NotImplemented
 
     def __init__(self):
@@ -27,12 +29,17 @@ class AbstractPolicy:
         return wrapper
 
     def path_cmp_key(self, path: Path):
-        """ returns a sort key e.g. for the `sorted` function"""
+        """
+        returns a sort key e.g. for the `sorted` function
+        lower is better
+        """
         raise NotImplementedError("A policy must override this method")
 
 
 class SimpleLossPolicy(AbstractPolicy):
-    """ Route via the lowest-loss path"""
+    """
+    Route via the lowest-loss path
+    """
     name = 'lowest-loss'
 
     @staticmethod
@@ -48,7 +55,9 @@ class SimpleLossPolicy(AbstractPolicy):
 
 
 class SimpleBandwidthPolicy(AbstractPolicy):
-    """ Route via the highest-bandwidth path"""
+    """
+    Route via the highest-bandwidth path
+    """
     name = 'highest-bandwidth'
 
     @staticmethod

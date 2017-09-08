@@ -5,9 +5,10 @@ def dict_reverse_lookup(d: dict, value):
     return list(d.keys())[list(d.values()).index(value)]
 
 
-class Path:
-    """Auxiliary class to handle paths, appending and their link
-        attributes """
+class Path(object):
+    """
+    Auxiliary class to handle paths, appending and their link attributes
+    """
 
     def __init__(self, path: str, attributes: dict,
                  next_hop: str, next_hop_interface: str):
@@ -39,7 +40,9 @@ class Path:
         return str(int(max(attributes, key=int, default=0)) + 1)
 
     def append(self, node: str, new_next_hop_interface: str, attributes: dict):
-        """Append a node with link attributes to the front of the path"""
+        """
+        Append a node with link attributes to the front of the path
+        """
         self.next_hop_interface = new_next_hop_interface
         self.next_hop = self.nodes[0]
 
@@ -50,7 +53,9 @@ class Path:
         self.policy_cache = {}
 
     def apply_attributes(self, attributes: dict):
-        """append all necessary attributes to global attributes dictionary"""
+        """
+        Append all necessary attributes to the global attributes dictionary
+        """
         for link in self.links:
             attr = self.attributes[link]
             if attr not in attributes.values():
@@ -60,8 +65,10 @@ class Path:
         self._global_attributes = attributes
 
     def __str__(self) -> str:
-        """Returns path as string, requires an up-to-date
-            global attribute dictionary"""
+        """
+        Returns path as string, requires an up-to-date
+        global attribute dictionary
+        """
         nodes = self.nodes[:]
         links = self.links[:]
         result = nodes.pop()
@@ -81,6 +88,10 @@ class Path:
         return result
 
     def __eq__(self, other):
+        """
+        Two paths are equal if they share the same nodes
+        over links with the same attributes
+        """
         if not isinstance(other, Path):
             raise ValueError("cannot compare path to {}".format(type(other)))
 

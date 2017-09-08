@@ -4,7 +4,10 @@ from .exceptions import InvalidMessage, InvalidPartialUpdate
 from .path import Path
 
 
-class BaseMessage:
+class BaseMessage(object):
+    """
+    Auxiliary class to encapsulate basic message fields
+    """
     def __init__(self):
         self.id = None
         self.seq = float('-inf')
@@ -27,6 +30,10 @@ class BaseMessage:
 
 
 class Message(BaseMessage):
+    """
+    This class handles new full and partial messages as well as
+    message validation
+    """
     def __init__(self, msg: dict, interface: dict, router_id: str, rx_time):
         super(Message, self).__init__()
         self._base = BaseMessage()
@@ -37,6 +44,16 @@ class Message(BaseMessage):
         self.apply_new_msg(msg, rx_time)
 
     def apply_new_msg(self, msg: dict, rx_time) -> bool:
+        """
+        save the new message, either apply it when it is a partial update
+        or replace all data when it is a full update
+        - raises InvalidMessage when the message is invalid or outdated
+        - raises InvalidPartialUpdate when the partial update has the wrong
+        base-message
+
+        Also replaces all string paths with Path instances and removes paths
+        which would create a routing loop
+        """
         self._validate_msg(msg)
 
         self.rx_time = rx_time
@@ -47,6 +64,9 @@ class Message(BaseMessage):
             return self._apply_partial(msg)
 
     def _validate_msg(self, msg: dict):
+        """
+        validates a message, raises Exception, see above
+        """
         # Check for essential fields
         for i in ('id', 'seq', 'type'):
             if i not in msg:
@@ -88,12 +108,16 @@ class Message(BaseMessage):
                     raise InvalidMessage("{} must be dict".format(i))
 
     def _apply_full(self, msg: dict) -> bool:
-        update = False
+        """
+        Apply a full update message and replace all internal data.
+        Save a base message for further potential partial updates
+        """
+        update_required = False
         self.seq = msg['seq']
         self.addr_v4 = msg.get('addr-v4', None)
         self.addr_v6 = msg.get('addr-v6', None)
 
-        update |= self._save_networks(msg)
+        update_required |= self._save_networks(msg)
 
         msg_routing_data = msg.get('routing-data', {})
         msg_link_attributes = msg.get('link-attributes', {})
@@ -112,25 +136,24 @@ class Message(BaseMessage):
                     'path': path,
                 }
 
-                if node not in msg_node_data:
-                    # We have no node_data for this node, apparently it does not
-                    # advertise any networks
-                    continue
-
         if self.routing_data != new_routing_data:
-            update = True
+            update_required = True
             self.routing_data = new_routing_data
 
         if self.node_data != msg_node_data:
-            update = True
+            update_required = True
             self.node_data = msg_node_data
 
         self._base = BaseMessage()
         self._base.apply_base_data(self)
 
-        return update
+        return update_required
 
     def _apply_partial(self, msg: dict) -> bool:
+        """
+        Apply a partial update, replace changed or deleted data
+        works on the base message stored with the last full update
+        """
         self.seq = msg['seq']
         self.addr_v4 = msg.get('addr_v4', self._base.addr_v4)
         self.addr_v6 = msg.get('addr_v6', self._base.addr_v6)

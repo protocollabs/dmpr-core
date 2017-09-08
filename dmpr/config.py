@@ -1,21 +1,21 @@
 # example configuration for DMPR daemon
 exa_conf = {
     "id": "ace80ef4-d284-11e6-bf26-cec0c932ce01",
-    "rtn-msg-interval": "30",
-    "rtn-msg-interval-jitter": "7",
-    "rtn-msg-hold-time": "90",
-    "max-full-update-interval": "10",
+    "rtn-msg-interval": 30,
+    "rtn-msg-interval-jitter": 7,
+    "rtn-msg-hold-time": 90,
+    "max-full-update-interval": 10,
     "mcast-v4-tx-addr": "224.0.1.1",
     "mcast-v6-tx-addr": "ff05:0:0:0:0:0:0:2",
     "proto-transport-enable": ["v4"],
     "interfaces": [
         {
             "name": "wlan0", "addr-v4": "10.0.0.1",
-            "link-characteristics": {"bandwidth": "100000", "loss": "0"}
+            "link-characteristics": {"bandwidth": 100000, "loss": 0}
         },
         {
             "name": "tetra0", "addr-v4": "10.0.0.1",
-            "link-characteristics": {"bandwidth": "10000", "loss": "0"}
+            "link-characteristics": {"bandwidth": 10000, "loss": 0}
         }
     ],
     "networks": [
@@ -50,18 +50,18 @@ class DefaultConfiguration(object):
     # Implementers SHOULD quantise values into a few classes to reduce the
     # DMPR routing packet size.
     # E.g. 1000, 5000, 10000, 100000, 1000000, 100000000, 100000000
-    LINK_CHARACTERISITCS_BANDWIDTH = 5000
+    LINK_CHARACTERISTICS_BANDWIDTH = 5000
     # default loss is in percent for a given path
     # Implementers SHOULD quantise values into a few classes to reduce the
     # DMPR routing packet size.
     # e.g. 0, 5, 10, 20, 40, 80
-    LINK_CHARACTERISITCS_LOSS = 0
+    LINK_CHARACTERISTICS_LOSS = 0
     # default link cost in a hypothetical currency, the higher the more valuable
     # e.g. wifi can be 0, LTE can be 100, satelite uplink can be 1000
-    LINK_CHARACTERISITCS_COST = 0
+    LINK_CHARACTERISTICS_COST = 0
 
     DEFAULT_ATTRIBUTES = {
-        'bandwidth': LINK_CHARACTERISITCS_BANDWIDTH,
-        'loss': LINK_CHARACTERISITCS_LOSS,
-        'cost': LINK_CHARACTERISITCS_COST,
+        'bandwidth': LINK_CHARACTERISTICS_BANDWIDTH,
+        'loss': LINK_CHARACTERISTICS_LOSS,
+        'cost': LINK_CHARACTERISTICS_COST,
     }

@@ -17,12 +17,12 @@ def normalize_network(network):
     return str(ipaddress.ip_network(network, strict=False))
 
 
-class NoOpTracer:
+class NoOpTracer(object):
     def log(self, tracepoint, msg, time):
         pass
 
 
-class NoOpLogger:
+class NoOpLogger(object):
     DEBUG = 10
     INFO = 20
     WARNING = 30
@@ -41,7 +41,7 @@ class NoOpLogger:
         pass
 
 
-class DMPRState:
+class DMPRState(object):
     def __init__(self):
         # Router state
         self.seq_no = 0
@@ -121,9 +121,11 @@ class DMPR(object):
             self.policies.remove(policy)
 
     def register_configuration(self, configuration: dict):
-        """ register and setup configuration. Raise
-            an error when values are wrongly configured
-            restarts dmpr if it was running"""
+        """
+        register and setup configuration. Raise
+        an error when values are wrongly configured
+        restarts dmpr if it was running
+        """
         self._conf = self._validate_config(configuration)
 
         self.trace('config.new', self._conf)
@@ -134,8 +136,10 @@ class DMPR(object):
 
     @staticmethod
     def _validate_config(configuration: dict) -> dict:
-        """ convert external python dict configuration into internal
-            configuration, check and set default values """
+        """
+        convert external python dict configuration into internal
+        configuration, check and set default values
+        """
         if not isinstance(configuration, dict):
             raise ConfigurationException("configuration must be dict-like")
 
@@ -219,18 +223,23 @@ class DMPR(object):
         return config
 
     def register_get_time_cb(self, function):
-        """ Register a callback for the given time, this functions
-            must not need any arguments"""
+        """
+        Register a callback for the given time, this functions
+        must not need any arguments
+        """
         self._get_time = function
 
     def register_routing_table_update_cb(self, function):
-        """ Register a callback for route updates, the signature should be:
-            function(routing_table: dict)"""
+        """
+        Register a callback for route updates, the signature should be:
+        function(routing_table: dict)
+        """
         self._routing_table_update_func = function
 
     def register_msg_tx_cb(self, function):
-        """ Register a callback for sending messages, the signature should be:
-            function(interface: str, ipversion: str, mcast_addr: str, msg: dict)
+        """
+        Register a callback for sending messages, the signature should be:
+        function(interface: str, ipversion: str, mcast_addr: str, msg: dict)
         """
         self._packet_tx_func = function
 
@@ -239,7 +248,10 @@ class DMPR(object):
     ##################
 
     def msg_rx(self, interface_name: str, msg: dict):
-        """receive routing packet, triggers all recalculations"""
+        """
+        receive routing packet, save it in the message
+        database and trigger all recalculations
+        """
 
         self.trace('rx.msg', msg)
 
@@ -279,6 +291,10 @@ class DMPR(object):
             pass  # TODO process reflections, for later
 
     def _process_full_requests(self, msg: dict):
+        """
+        Check the received request-full field for itself or True and
+        schedule a full update if necessary
+        """
         request = msg['request-full']
         if (isinstance(request, list) and self._conf['id'] in request) or \
                 (isinstance(request, bool) and request):
@@ -311,14 +327,17 @@ class DMPR(object):
         })
 
     def _compute_routing_data(self, policy):
-        """Update the internal databases with the routing information
-                    of this policy"""
+        """
+        compute new routing data based on all messages
+        in the message database
+        """
 
         routing_data = {}
         self.routing_data[policy.name] = routing_data
 
         paths, networks = self._parse_msg_db(policy)
 
+        # for every node where there is a path to
         for node, node_paths in paths.items():
             node_paths = sorted(node_paths, key=policy.path_cmp_key)
             best_path = node_paths[0]
@@ -329,6 +348,8 @@ class DMPR(object):
             if node not in networks:
                 self.log.warning("No node data for target")
                 continue
+
+            # Merge all data of this node advertised by the different neighbours
             node_networks = self._merge_networks(networks[node])
 
             if not node_networks:
@@ -339,11 +360,15 @@ class DMPR(object):
             node_networks_entry.update(self._update_network_data(node_networks))
 
     def _compute_routing_table(self, policy):
+        """
+        compute a new routing table based on the routing data
+        """
         routing_table = []
         self.routing_table[policy.name] = routing_table
 
         routing_data = self.routing_data[policy.name]
 
+        # Compute a routing table entry for every networf of every node
         for node, node_data in self.node_data.items():
             for network in node_data['networks']:
                 if network in self.networks['retracted']:
@@ -380,10 +405,15 @@ class DMPR(object):
                 })
 
     def _parse_msg_db(self, policy: AbstractPolicy) -> tuple:
+        """
+        parse the message database, for each reachable node
+        accumulate all available nodes and paths in a list
+        """
         paths = {}
         networks = {}
         for interface in self.msg_db:
             for neighbour, msg in self.msg_db[interface].items():
+                # Add the neighbour as path and node to our lists
                 neighbour_paths = paths.setdefault(neighbour, [])
                 path = self._get_neighbour_path(interface, neighbour)
                 neighbour_paths.append(path)
@@ -391,6 +421,8 @@ class DMPR(object):
                 neighbour_networks = networks.setdefault(neighbour, [])
                 neighbour_networks.append(msg.networks)
 
+                # Add all paths and nodes advertised by this neighbour
+                # to our list
                 routing_data = msg.routing_data.get(policy.name, {})
                 for node, node_data in routing_data.items():
                     node_paths = paths.setdefault(node, [])
@@ -403,6 +435,9 @@ class DMPR(object):
         return paths, networks
 
     def _get_neighbour_path(self, interface_name: str, neighbour: str):
+        """
+        Get the path to a direct neighbour
+        """
         interface = self._conf['interfaces'][interface_name]
         path = Path(path=neighbour,
                     attributes={},
@@ -415,7 +450,9 @@ class DMPR(object):
 
     @staticmethod
     def _merge_networks(networks: list) -> dict:
-        """ Merges all networks, retracted status overwrites not retracted"""
+        """
+        Merges a list of networks, retracted status overwrites not retracted
+        """
         result = {}
         for item in networks:
             for network, network_data in item.items():
@@ -430,7 +467,8 @@ class DMPR(object):
         return result
 
     def _update_network_data(self, networks: dict) -> dict:
-        """ Apply network retraction policy according to the following table:
+        """
+        Apply network retraction policy according to the following table:
 in current | in retracted | msg retracted |
      0     |       0      |       0       | save in current, forward
      0     |       0      |       1       | ignore, don't forward
@@ -441,9 +479,15 @@ in current | in retracted | msg retracted |
      1     |       1      |       0       | n/a
      1     |       1      |       1       | n/a
 
-            networks in retracted will get deleted after a hold time, this hold
-            time MUST be greater than the worst case propagation time for the
-            retracted flag"""
+        networks in retracted and current will get deleted after a
+        hold time, this hold time MUST be greater than the worst case
+        propagation time for the retracted flag.
+
+        This allows for network retraction by a node. The retracted
+        status spreads through the network, overriding on all nodes
+        while getting ignored on nodes which did not now this network
+        previously.
+        """
         result = {}
 
         current = self.networks['current']
@@ -481,15 +525,17 @@ in current | in retracted | msg retracted |
     ####################
 
     def tick(self):
-        """ this function is called every second, DMPR will
-            implement his own timer/timeout related functionality
-            based on this ticker. This is not the most efficient
-            way to implement timers but it is suitable to run in
-            a real and simulated environment where time is discret.
-            The argument time is a float value in seconds which should
-            not used in a absolute manner, depending on environment this
-            can be a unix timestamp or starting at 0 in simulation
-            environments """
+        """
+        this function is called every second, DMPR will
+        implement his own timer/timeout related functionality
+        based on this ticker. This is not the most efficient
+        way to implement timers but it is suitable to run in
+        a real and simulated environment where time is discret.
+        The argument time is a float value in seconds which should
+        not used in a absolute manner, depending on environment this
+        can be a unix timestamp or starting at 0 in simulation
+        environments
+        """
         if not self._started:
             # start() is not called, ignore this call
             return
@@ -506,7 +552,9 @@ in current | in retracted | msg retracted |
             self._calc_next_tx_time()
 
     def _clean_msg_db(self) -> bool:
-        """ Iterates over all msg_db entries and purges all obsolete entries"""
+        """
+        Iterates over all msg_db entries and purges all timed out entries
+        """
         obsolete = []
         now = self.now()
         hold_time = self._conf['rtn-msg-hold-time']
@@ -525,8 +573,9 @@ in current | in retracted | msg retracted |
         return False
 
     def _clean_networks(self) -> bool:
-        """ Iterates over all retracted networks and
-            purges all obsolete entries"""
+        """
+        Iterates over all known networks and removes the timed out ones
+        """
         update = False
         obsolete = []
         now = self.now()
@@ -560,8 +609,9 @@ in current | in retracted | msg retracted |
     #####################
 
     def tx_route_packet(self):
-        # depending on local information the route
-        # packets must be generated for each interface
+        """
+        Generate and send a new routing packet
+        """
         self._inc_seq_no()
         for interface in self._conf['interfaces']:
             msg = self._create_routing_msg(interface)
@@ -583,6 +633,9 @@ in current | in retracted | msg retracted |
             return self._create_partial_routing_msg(interface_name)
 
     def _create_full_routing_msg(self, interface_name: str) -> dict:
+        """
+        Create a new full update packet
+        """
         packet = {
             'id': self._conf['id'],
             'seq': self.state.seq_no,
@@ -644,7 +697,9 @@ in current | in retracted | msg retracted |
         return packet
 
     def _create_partial_routing_msg(self, interface_name: str) -> dict:
-        """ create a partial update based on the last full message"""
+        """
+        Create a partial update based on the last full message
+        """
         packet = {
             'id': self._conf['id'],
             'seq': self.state.seq_no,
@@ -654,6 +709,7 @@ in current | in retracted | msg retracted |
         base_msg = self.state.last_full_msg
         packet['partial-base'] = base_msg['seq']
 
+        # Add changed interface address data
         interface = self._conf['interfaces'][interface_name]
         for addr in ('addr-v4', 'addr-v6'):
             if addr in interface:
@@ -666,10 +722,12 @@ in current | in retracted | msg retracted |
                 if addr in base_msg:
                     packet[addr] = None
 
+        # Add own networks if they changed
         networks = self._prepare_networks()
         if not self._eq_dicts(base_msg['networks'], networks):
             packet['networks'] = networks
 
+        # Add all changed paths, on a policy-node basis
         link_attributes = {}
         routing_data = {}
         base_routing_data = base_msg.get('routing-data', {})
@@ -694,6 +752,9 @@ in current | in retracted | msg retracted |
             packet['routing-data'] = routing_data
             packet['link-attributes'] = link_attributes
 
+        # Add all changed nodes. This includes new nodes we send in this update,
+        # old nodes that were sent and changed as well as deleted nodes when
+        # we delete the path in this update
         required_nodes = {node for policy in routing_data for node in
                           routing_data[policy] if
                           routing_data[policy][node] is not None}
@@ -721,6 +782,10 @@ in current | in retracted | msg retracted |
         return packet
 
     def _prepare_networks(self) -> dict:
+        """
+        Translate the configured networks for this router into
+        the message format
+        """
         result = {}
         networks = self._conf['networks']
         for network in networks:
@@ -731,6 +796,10 @@ in current | in retracted | msg retracted |
         return result
 
     def _prepare_full_requests(self):
+        """
+        Translate the list of nodes we want to request a
+        full update from into the message format
+        """
         if True in self.state.request_full_update:
             result = True
         else:
@@ -742,6 +811,9 @@ in current | in retracted | msg retracted |
         self.state.seq_no += 1
 
     def _calc_next_tx_time(self):
+        """
+        Set the next transmit time
+        """
         interval = self._conf["rtn-msg-interval"]
         if self.state.next_tx_time is None:
             # first time transmitting, just wait jitter to join network faster
