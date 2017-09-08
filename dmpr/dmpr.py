@@ -8,7 +8,7 @@ from .config import DefaultConfiguration
 from .exceptions import ConfigurationException, InvalidPartialUpdate, \
     InvalidMessage
 from .message import Message
-from .path import Path
+from .path import Path, LinkAttributes
 from .policies import AbstractPolicy
 
 
@@ -444,7 +444,7 @@ class DMPR(object):
         """
         interface = self._conf['interfaces'][interface_name]
         path = Path(path=neighbor,
-                    attributes={},
+                    attributes=LinkAttributes(),
                     next_hop=neighbor,
                     next_hop_interface=interface_name)
 
@@ -661,7 +661,7 @@ in current | in retracted | msg retracted |
         if self.routing_data:
             routing_data = {}
             node_data = {}
-            link_attributes = {}
+            link_attributes = LinkAttributes()
 
             # We need to separate the routing data for the new base message
             # because we need to be able to compare two entries, which is
@@ -732,7 +732,7 @@ in current | in retracted | msg retracted |
             packet['networks'] = networks
 
         # Add all changed paths, on a policy-node basis
-        link_attributes = {}
+        link_attributes = LinkAttributes()
         routing_data = {}
         base_routing_data = base_msg.get('routing-data', {})
         # Check for new or updated routes

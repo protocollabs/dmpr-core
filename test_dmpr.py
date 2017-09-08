@@ -1,4 +1,6 @@
-from dmpr import DMPR, Path
+from .dmpr import DMPR
+
+from .dmpr.path import Path, LinkAttributes
 
 
 class TestAuxMethods:
@@ -52,12 +54,13 @@ class TestAuxMethods:
 
 
 class TestPath:
-    def get_path(self):
+    @staticmethod
+    def get_path():
         return Path(path='A>[1]>B>[2]>C',
-                    attributes={
+                    attributes=LinkAttributes({
                         '1': {'loss': 10},
                         '2': {'loss': 20}
-                    },
+                    }),
                     next_hop='B',
                     next_hop_interface='wlan0')
 
@@ -76,14 +79,14 @@ class TestPath:
 
     def test_correct_applying_to_new(self):
         path = self.get_path()
-        attributes = {}
+        attributes = LinkAttributes()
         path.apply_attributes(attributes)
         assert {'loss': 20} in attributes.values()
         assert {'loss': 10} in attributes.values()
 
     def test_correct_applying_to_others(self):
         path = self.get_path()
-        attributes = {'1': {'loss': 30}}
+        attributes = LinkAttributes({'1': {'loss': 30}})
         path.apply_attributes(attributes)
         assert {'loss': 20} in attributes.values()
         assert {'loss': 10} in attributes.values()
@@ -91,7 +94,7 @@ class TestPath:
 
     def test_str(self):
         path = self.get_path()
-        attributes = {}
+        attributes = LinkAttributes()
         path.apply_attributes(attributes)
 
         expected = "A>[{}]>B>[{}]>C"

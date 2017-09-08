@@ -1,7 +1,7 @@
 import copy
 
 from .exceptions import InvalidMessage, InvalidPartialUpdate
-from .path import Path
+from .path import Path, LinkAttributes
 
 
 class BaseMessage(object):
@@ -126,6 +126,7 @@ class Message(BaseMessage):
 
         msg_routing_data = msg.get('routing-data', {})
         msg_link_attributes = msg.get('link-attributes', {})
+        msg_link_attributes = LinkAttributes(msg_link_attributes)
         msg_node_data = msg.get('node-data', {})
         new_routing_data = {}
         for policy in msg_routing_data:
@@ -180,14 +181,17 @@ class Message(BaseMessage):
 
         self.routing_data = copy.deepcopy(self._base.routing_data)
         routing_data = msg.get('routing-data', {})
+        link_attributes = msg.get('link-attributes', {})
+        link_attributes = LinkAttributes(link_attributes)
         for policy in routing_data:
+            self.routing_data.setdefault(policy, {})
             for node in routing_data[policy]:
                 if routing_data[policy][node] is None:
                     if node in self.routing_data[policy]:
                         del self.routing_data[policy][node]
                 else:
                     path = self._get_path(routing_data[policy][node]['path'],
-                                          msg.get('link-attributes', {}))
+                                          link_attributes)
                     if not path:
                         # Routing loop, delete previous entry as it is outdated
                         if node in self.routing_data[policy]:
@@ -228,7 +232,7 @@ class Message(BaseMessage):
             return True
         return False
 
-    def _get_path(self, path: str, link_attributes: dict) -> Path:
+    def _get_path(self, path: str, link_attributes: LinkAttributes) -> Path:
         path = Path(path=path,
                     attributes=link_attributes,
                     next_hop='',
