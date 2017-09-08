@@ -16,18 +16,8 @@ class Path(object):
         if len(path) % 2 != 1:
             raise InternalException("Invalid path: {}".format(path))
 
-        self.links = []
-        self.nodes = []
-        for i, element in enumerate(path):
-            if i % 2 == 0:
-                # This is a node
-                self.nodes.append(element)
-            else:
-                # This is a link
-                if not (element.startswith('[') and element.endswith(']')):
-                    msg = "Invalid path: {}, link format error: {}"
-                    raise InternalException(msg.format(path, element))
-                self.links.append(element.strip('[]'))
+        self.links = [i.strip('[]') for i in path[1::2]]
+        self.nodes = [i for i in path[::2]]
 
         self.attributes = attributes
         self.next_hop = next_hop
