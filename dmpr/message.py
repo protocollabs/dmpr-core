@@ -92,11 +92,11 @@ class Message(BaseMessage):
                 raise InvalidPartialUpdate("Wrong base message sequence number")
 
         # If routing-data exists and there is at least one policy with paths
-        # then there must be link-attributes
+        # then there must be link-attributes in full updates
         # Also every policy value must be a dict
         routing_data = msg.get('routing-data', {})
         if routing_data and any(routing_data.values()):
-            if not msg.get('link-attributes'):
+            if not msg.get('link-attributes') and msg['type'] == 'full':
                 raise InvalidMessage("Need link-attributes for routing-data")
             for i in routing_data.values():
                 if not isinstance(i, dict):
@@ -174,7 +174,9 @@ class Message(BaseMessage):
                     path = self._get_path(routing_data[policy][node]['path'],
                                           msg.get('link-attributes', {}))
                     if not path:
-                        # Routing loop
+                        # Routing loop, delete previous entry as it is outdated
+                        if node in self.routing_data[policy]:
+                            del self.routing_data[policy][node]
                         continue
                     self.routing_data[policy][node] = {
                         'path': path
