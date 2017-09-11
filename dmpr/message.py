@@ -8,6 +8,7 @@ class BaseMessage(object):
     """
     Auxiliary class to encapsulate basic message fields
     """
+
     def __init__(self):
         self.id = None
         self.seq = float('-inf')
@@ -17,6 +18,8 @@ class BaseMessage(object):
         self.networks = {}
         self.routing_data = {}
         self.node_data = {}
+        self.reflect = {}
+        self.reflections = {}
 
     def apply_base_data(self, msg):
         self.id = msg.id
@@ -27,6 +30,7 @@ class BaseMessage(object):
         self.networks = msg.networks
         self.routing_data = msg.routing_data
         self.node_data = msg.node_data
+        self.reflections = msg.reflections
 
 
 class Message(BaseMessage):
@@ -34,6 +38,7 @@ class Message(BaseMessage):
     This class handles new full and partial messages as well as
     message validation
     """
+
     def __init__(self, msg: dict, interface: dict, router_id: str, rx_time):
         super(Message, self).__init__()
         self._base = BaseMessage()
@@ -144,6 +149,16 @@ class Message(BaseMessage):
             update_required = True
             self.node_data = msg_node_data
 
+        reflect = msg.get('reflect', False)
+        if reflect != self.reflect:
+            self.reflect = reflect
+            update_required = True
+
+        reflections = msg.get('reflections', {})
+        if self.reflections != reflections:
+            self.reflections = reflections
+            update_required = True
+
         self._base = BaseMessage()
         self._base.apply_base_data(self)
 
@@ -192,6 +207,17 @@ class Message(BaseMessage):
                     del self.node_data[node]
             else:
                 self.node_data[node] = node_data[node]
+
+        self.reflect = msg.get('reflect', False)
+
+        self.reflections = copy.deepcopy(self._base.reflections)
+        reflections = msg.get('reflections', {})
+        for node in reflections:
+            if reflections[node] is None:
+                if node in self.reflections:
+                    del self.reflections[node]
+            else:
+                self.reflections[node] = reflections[node]
 
         return True  # TODO add support for update detection
 
