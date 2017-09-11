@@ -84,6 +84,7 @@ class DMPR(object):
             'current': {},
             'retracted': {}
         }
+        self.reflections = {}
         self.state = DMPRState()
         self.state.next_full_update = 0
 
@@ -284,12 +285,6 @@ class DMPR(object):
         if 'request-full' in msg:
             self._process_full_requests(msg)
 
-        if 'reflector' in msg:
-            pass  # TODO update reflector data, for later
-
-        if 'reflections' in msg:
-            pass  # TODO process reflections, for later
-
     def _process_full_requests(self, msg: dict):
         """
         Check the received request-full field for itself or True and
@@ -335,7 +330,8 @@ class DMPR(object):
         routing_data = {}
         self.routing_data[policy.name] = routing_data
 
-        paths, networks = self._parse_msg_db(policy)
+        paths, networks, reflections = self._parse_msg_db(policy)
+        self.reflections = reflections
 
         # for every node where there is a path to
         for node, node_paths in paths.items():
@@ -411,6 +407,11 @@ class DMPR(object):
         """
         paths = {}
         networks = {}
+        reflections = {}
+
+        # For reflections and networks, we only save the data of the newest
+        # message, for paths we want to include all available paths
+        newest_seq_no = {}
         for interface in self.msg_db:
             for neighbor, msg in self.msg_db[interface].items():
                 # Add the neighbor as path and node to our lists
@@ -418,8 +419,11 @@ class DMPR(object):
                 path = self._get_neighbor_path(interface, neighbor)
                 neighbor_paths.append(path)
 
-                neighbor_networks = networks.setdefault(neighbor, [])
-                neighbor_networks.append(msg.networks)
+                if msg.seq > newest_seq_no.get(neighbor, float('-inf')):
+                    networks[neighbor] = [msg.networks]
+                    if msg.reflect:
+                        reflections[neighbor] = msg.reflect
+                    newest_seq_no[neighbor] = msg.seq
 
                 # Add all paths and nodes advertised by this neighbor
                 # to our list
@@ -432,7 +436,7 @@ class DMPR(object):
                     node_networks = networks.setdefault(node, [])
                     node_networks.append(node_data['networks'])
 
-        return paths, networks
+        return paths, networks, reflections
 
     def _get_neighbor_path(self, interface_name: str, neighbor: str):
         """
