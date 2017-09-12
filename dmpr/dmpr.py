@@ -728,7 +728,7 @@ in current | in retracted | msg retracted |
 
         # Add own networks if they changed
         networks = self._prepare_networks()
-        if not self._eq_dicts(base_msg['networks'], networks):
+        if base_msg['networks'] != networks:
             packet['networks'] = networks
 
         # Add all changed paths, on a policy-node basis
@@ -739,8 +739,8 @@ in current | in retracted | msg retracted |
         for policy in self.routing_data:
             base_msg_policy = base_routing_data.get(policy, {})
             for node, node_data in self.routing_data[policy].items():
-                if node not in base_msg_policy or not self._eq_dicts(
-                        base_msg_policy[node], node_data):
+                if node not in base_msg_policy or \
+                                base_msg_policy[node] != node_data:
                     path = node_data['path']
                     path.apply_attributes(link_attributes)
                     routing_data.setdefault(policy, {})[node] = {
@@ -870,25 +870,3 @@ in current | in retracted | msg retracted |
 
     def _dummy_cb(self, *args, **kwargs):
         pass
-
-    @classmethod
-    def _eq_dicts(cls, dict1, dict2):
-        return dict1 == dict2
-        if dict1 is None or dict2 is None:
-            return False
-
-        if not isinstance(dict1, dict) or not isinstance(dict2, dict):
-            return False
-
-        if set(dict1.keys()) != set(dict2.keys()):
-            return False
-
-        for key, value in dict1.items():
-            if isinstance(value, dict):
-                if not cls._eq_dicts(dict1[key], dict2[key]):
-                    return False
-            else:
-                if dict1[key] != dict2[key]:
-                    return False
-
-        return True
