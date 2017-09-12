@@ -698,6 +698,9 @@ in current | in retracted | msg retracted |
         if request_full:
             packet['request-full'] = request_full
 
+        if self.reflections:
+            packet['reflected'] = self.reflections
+
         return packet
 
     def _create_partial_routing_msg(self, interface_name: str) -> dict:
@@ -782,6 +785,22 @@ in current | in retracted | msg retracted |
         request_full = self._prepare_full_requests()
         if request_full:
             packet['request-full'] = request_full
+
+        # Add all changed reflections
+        reflections = {}
+        base_reflections = base_msg.get('reflected', {})
+        # Check for new or changed reflections
+        for node in self.reflections:
+            if node not in base_reflections or \
+                            base_reflections[node] != self.reflections[node]:
+                reflections[node] = self.reflections[node]
+        # Check for deleted reflections
+        for node in base_reflections:
+            if node not in self.reflections:
+                reflections[node] = None
+        # Save reflections in packet
+        if reflections:
+            packet['reflected'] = reflections
 
         return packet
 
