@@ -1,3 +1,4 @@
+import collections
 import copy
 import functools
 import ipaddress
@@ -10,6 +11,10 @@ from .exceptions import ConfigurationException, InvalidPartialUpdate, \
 from .message import Message
 from .path import Path, LinkAttributes
 from .policies import AbstractPolicy
+
+FULL_MODE_ANALYSE_HISTORY = 10
+FULL_MODE_TRIGGER_THRESH = 100
+FULL_MODE_TIME = 1000
 
 
 @functools.lru_cache(maxsize=1024)
@@ -51,9 +56,13 @@ class DMPRState(object):
 
         # Message handling state
         self.next_tx_time = None
-        self.request_full_update = [True]
         self.next_full_update = 0
         self.last_full_msg = {}
+
+        self.request_full_update = [True]
+        self.full_request_queue = collections.deque(
+            maxlen=FULL_MODE_ANALYSE_HISTORY)
+        self.full_only_mode = False
 
 
 class DMPR(object):
@@ -294,6 +303,7 @@ class DMPR(object):
         if (isinstance(request, list) and self._conf['id'] in request) or \
                 (isinstance(request, bool) and request):
             self.state.next_full_update = 0
+            self.state.full_request_queue.append(self.now())
 
     #######################
     #  Route Calculation  #
@@ -545,6 +555,7 @@ in current | in retracted | msg retracted |
             return
         self.trace('tick', self.now())
 
+        self._process_full_mode_queue()
         self.state.update_required |= self._clean_msg_db()
         self.state.update_required |= self._clean_networks()
         if self.state.update_required:
@@ -608,6 +619,19 @@ in current | in retracted | msg retracted |
 
         return update
 
+    def _process_full_mode_queue(self):
+        if self.state.full_only_mode:
+            if self.now() > self.state.full_only_mode + FULL_MODE_TIME:
+                self.state.full_only_mode = False
+            else:
+                return
+
+        if len(self.state.full_request_queue) != FULL_MODE_ANALYSE_HISTORY:
+            return
+        avg = sum(self.state.full_request_queue) / FULL_MODE_ANALYSE_HISTORY
+        if avg > self.now() - FULL_MODE_TRIGGER_THRESH:
+            self.state.full_only_mode = self.now()
+
     #####################
     #  message tx path  #
     #####################
@@ -629,7 +653,7 @@ in current | in retracted | msg retracted |
                                          msg)
 
     def _create_routing_msg(self, interface_name: str) -> dict:
-        if self.state.next_full_update <= 0:
+        if self.state.next_full_update <= 0 or self.state.full_only_mode:
             self.state.next_full_update = self._conf['max-full-update-interval']
             return self._create_full_routing_msg(interface_name)
         else:
