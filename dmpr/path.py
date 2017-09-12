@@ -5,39 +5,51 @@ def dict_reverse_lookup(d: dict, value):
     return list(d.keys())[list(d.values()).index(value)]
 
 
+class LinkAttributes(dict):
+    """
+    This class is here mainly for caching reasons
+    """
+
+    def __init__(self, attributes=None):
+        if attributes is None:
+            attributes = {}
+        super(LinkAttributes, self).__init__(attributes)
+        self.current_id = int(max(attributes, key=int, default=0))
+
+    def get_next_id(self):
+        self.current_id += 1
+        return str(self.current_id)
+
+
 class Path(object):
     """
     Auxiliary class to handle paths, appending and their link attributes
     """
 
-    def __init__(self, path: str, attributes: dict,
+    __slots__ = (
+        'links',
+        'nodes',
+        'attributes',
+        'next_hop',
+        'next_hop_interface',
+        '_global_attributes',
+        'policy_cache',
+    )
+
+    def __init__(self, path: str, attributes: LinkAttributes,
                  next_hop: str, next_hop_interface: str):
         path = path.split('>')
         if len(path) % 2 != 1:
             raise InternalException("Invalid path: {}".format(path))
 
-        self.links = []
-        self.nodes = []
-        for i, element in enumerate(path):
-            if i % 2 == 0:
-                # This is a node
-                self.nodes.append(element)
-            else:
-                # This is a link
-                if not (element.startswith('[') and element.endswith(']')):
-                    msg = "Invalid path: {}, link format error: {}"
-                    raise InternalException(msg.format(path, element))
-                self.links.append(element.strip('[]'))
+        self.links = [i.strip('[]') for i in path[1::2]]
+        self.nodes = [i for i in path[::2]]
 
         self.attributes = attributes
         self.next_hop = next_hop
         self.next_hop_interface = next_hop_interface
         self._global_attributes = {}
         self.policy_cache = {}
-
-    @staticmethod
-    def _next_id(attributes: dict) -> str:
-        return str(int(max(attributes, key=int, default=0)) + 1)
 
     def append(self, node: str, new_next_hop_interface: str, attributes: dict):
         """
@@ -46,21 +58,20 @@ class Path(object):
         self.next_hop_interface = new_next_hop_interface
         self.next_hop = self.nodes[0]
 
-        attribute_id = self._next_id(self.attributes)
+        attribute_id = self.attributes.get_next_id()
         self.links.insert(0, attribute_id)
         self.nodes.insert(0, node)
         self.attributes[attribute_id] = attributes
         self.policy_cache = {}
 
-    def apply_attributes(self, attributes: dict):
+    def apply_attributes(self, attributes: LinkAttributes):
         """
         Append all necessary attributes to the global attributes dictionary
         """
         for link in self.links:
             attr = self.attributes[link]
             if attr not in attributes.values():
-                attribute_id = self._next_id(attributes)
-                attributes[attribute_id] = attr
+                attributes[attributes.get_next_id()] = attr
 
         self._global_attributes = attributes
 

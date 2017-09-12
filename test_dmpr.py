@@ -1,63 +1,16 @@
-from dmpr import DMPR, Path
+from dmpr import DMPR
 
-
-class TestAuxMethods:
-    @staticmethod
-    def get_dict():
-        return {
-            1: {1: 1, 2: 2},
-            2: {1: 1, 2: 2},
-            3: {1: (1, 2)},
-            4: "test",
-            5: [2, 3]
-        }
-
-    def test_cmp_dict_simple(self):
-        f = DMPR._eq_dicts
-
-        assert not f(None, None)
-        assert f({}, {})
-        assert f({1: 1}, {1: 1})
-        assert not f({1: 1}, {2: 1})
-        assert not f({1: 1}, {1: 2})
-
-        assert f({1: {1: 1}}, {1: {1: 1}})
-        assert not f({1: {1: 1}}, {1: {1: 2}})
-        assert not f({1: {1: 1}}, {1: {2: 1}})
-
-    def test_cmp_dict_deep(self):
-        f = DMPR._eq_dicts
-        dict1 = self.get_dict()
-        dict2 = self.get_dict()
-
-        assert f(dict1, dict1)
-        assert f(dict1, dict2)
-        dict2[3][1] = (1, 2)
-        assert f(dict1, dict2)
-        dict2[3][1] = (2, 3)
-        assert not f(dict1, dict2)
-
-    def test_cmp_dict_deep_mutable(self):
-        f = DMPR._eq_dicts
-        dict1 = self.get_dict()
-        dict2 = self.get_dict()
-
-        dict1[5] = [self.get_dict()]
-        dict2[5] = [self.get_dict()]
-        assert f(dict1, dict2)
-        dict2[5][0][4] = "error"
-        assert not f(dict1, dict2)
-        dict2[5][0] = None
-        assert not f(dict1, dict2)
+from dmpr.path import Path, LinkAttributes
 
 
 class TestPath:
-    def get_path(self):
+    @staticmethod
+    def get_path():
         return Path(path='A>[1]>B>[2]>C',
-                    attributes={
+                    attributes=LinkAttributes({
                         '1': {'loss': 10},
                         '2': {'loss': 20}
-                    },
+                    }),
                     next_hop='B',
                     next_hop_interface='wlan0')
 
@@ -76,14 +29,14 @@ class TestPath:
 
     def test_correct_applying_to_new(self):
         path = self.get_path()
-        attributes = {}
+        attributes = LinkAttributes()
         path.apply_attributes(attributes)
         assert {'loss': 20} in attributes.values()
         assert {'loss': 10} in attributes.values()
 
     def test_correct_applying_to_others(self):
         path = self.get_path()
-        attributes = {'1': {'loss': 30}}
+        attributes = LinkAttributes({'1': {'loss': 30}})
         path.apply_attributes(attributes)
         assert {'loss': 20} in attributes.values()
         assert {'loss': 10} in attributes.values()
@@ -91,7 +44,7 @@ class TestPath:
 
     def test_str(self):
         path = self.get_path()
-        attributes = {}
+        attributes = LinkAttributes()
         path.apply_attributes(attributes)
 
         expected = "A>[{}]>B>[{}]>C"
