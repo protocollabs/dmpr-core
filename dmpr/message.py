@@ -19,7 +19,7 @@ class BaseMessage(object):
         self.routing_data = {}
         self.node_data = {}
         self.reflect = {}
-        self.reflections = {}
+        self.reflected = {}
 
     def apply_base_data(self, msg):
         self.id = msg.id
@@ -30,7 +30,7 @@ class BaseMessage(object):
         self.networks = msg.networks
         self.routing_data = msg.routing_data
         self.node_data = msg.node_data
-        self.reflections = msg.reflections
+        self.reflected = msg.reflected
 
 
 class Message(BaseMessage):
@@ -154,9 +154,9 @@ class Message(BaseMessage):
             self.reflect = reflect
             update_required = True
 
-        reflections = msg.get('reflections', {})
-        if self.reflections != reflections:
-            self.reflections = reflections
+        reflected = msg.get('reflected', {})
+        if self.reflected != reflected:
+            self.reflected = reflected
             update_required = True
 
         self._base = BaseMessage()
@@ -210,14 +210,14 @@ class Message(BaseMessage):
 
         self.reflect = msg.get('reflect', False)
 
-        self.reflections = copy.deepcopy(self._base.reflections)
-        reflections = msg.get('reflections', {})
-        for node in reflections:
-            if reflections[node] is None:
-                if node in self.reflections:
-                    del self.reflections[node]
+        self.reflected = copy.deepcopy(self._base.reflected)
+        reflected = msg.get('reflected', {})
+        for node in reflected:
+            if reflected[node] is None:
+                if node in self.reflected:
+                    del self.reflected[node]
             else:
-                self.reflections[node] = reflections[node]
+                self.reflected[node] = reflected[node]
 
         return True  # TODO add support for update detection
 
