@@ -2,15 +2,17 @@ import collections
 import copy
 import functools
 import ipaddress
+import logging
 import random
-from datetime import datetime
 
 from .config import DefaultConfiguration
-from .exceptions import ConfigurationException, InvalidPartialUpdate, \
-    InvalidMessage
+from .exceptions import ConfigurationException, InvalidMessage, \
+    InvalidPartialUpdate
 from .message import Message
-from .path import Path, LinkAttributes
+from .path import LinkAttributes, Path
 from .policies import AbstractPolicy
+
+logger = logging.getLogger(__name__)
 
 FULL_MODE_ANALYSE_HISTORY = 10
 FULL_MODE_TRIGGER_THRESH = 100
@@ -24,25 +26,6 @@ def normalize_network(network):
 
 class NoOpTracer(object):
     def log(self, tracepoint, msg, time):
-        pass
-
-
-class NoOpLogger(object):
-    DEBUG = 10
-    INFO = 20
-    WARNING = 30
-    ERROR = 40
-    CRITICAL = 50
-
-    def __init__(self, loglevel=INFO):
-        self.loglevel = loglevel
-        self.debug = functools.partial(self.log, sev=self.DEBUG)
-        self.info = functools.partial(self.log, sev=self.INFO)
-        self.warning = functools.partial(self.log, sev=self.WARNING)
-        self.error = functools.partial(self.log, sev=self.ERROR)
-        self.critical = functools.partial(self.log, sev=self.CRITICAL)
-
-    def log(self, msg, sev, time=lambda: datetime.now().isoformat()):
         pass
 
 
@@ -66,9 +49,10 @@ class DMPRState(object):
 
 
 class DMPR(object):
-    def __init__(self, log=NoOpLogger(), tracer=NoOpTracer()):
-        self.log = log
+    def __init__(self, log=logger, tracer=NoOpTracer()):
         self.tracer = tracer
+        self._logger = log
+        self.log = logger
 
         self._started = False
         self._conf = None
@@ -108,6 +92,7 @@ class DMPR(object):
         if self._conf is None:
             msg = "Please register a configuration before starting"
             raise ConfigurationException(msg)
+        self.log = self._logger.getChild(self._conf['id'])
 
         self.log.info("starting DMPR core")
         self._reset()
@@ -291,6 +276,8 @@ class DMPR(object):
             self.state.request_full_update.append(msg['id'])
             return
 
+        self.trace('rx.msg.valid', msg)
+
         if 'request-full' in msg:
             self._process_full_requests(msg)
 
@@ -398,7 +385,7 @@ class DMPR(object):
                 except KeyError:
                     msg = "node {node} advertises IPv{version} network but " \
                           "has no IPv{version} address"
-                    self.log.error(msg.format(node=node,
+                    self.log.warning(msg.format(node=node,
                                               version=version))
                     continue
 
@@ -871,7 +858,7 @@ in current | in retracted | msg retracted |
         now = self.now()
         self.state.next_tx_time = now + wait_time
         self.log.debug("schedule next transmission for {} seconds".format(
-            self.state.next_tx_time), time=now)
+            self.state.next_tx_time))
 
     ###############
     #  Callbacks  #
