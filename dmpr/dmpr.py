@@ -640,9 +640,13 @@ in current | in retracted | msg retracted |
                                          msg)
 
     def _create_routing_msg(self, interface_name: str) -> dict:
-        if self.state.next_full_update <= 0 or self.state.full_only_mode:
+        full_only = self.state.full_only_mode and \
+                    self._conf['enable-full-only-mode']
+
+        if self.state.next_full_update <= 0 or full_only:
             self.state.next_full_update = self._conf['max-full-update-interval']
             return self._create_full_routing_msg(interface_name)
+
         else:
             self.state.next_full_update -= 1
             return self._create_partial_routing_msg(interface_name)
