@@ -5,6 +5,7 @@ exa_conf = {
     "rtn-msg-interval-jitter": 7,
     "rtn-msg-hold-time": 90,
     "max-full-update-interval": 10,
+    "enable-full-only-mode": False,
     "mcast-v4-tx-addr": "224.0.1.1",
     "mcast-v6-tx-addr": "ff05:0:0:0:0:0:0:2",
     "proto-transport-enable": ["v4"],
@@ -34,6 +35,7 @@ class DefaultConfiguration(object):
     rtn_msg_hold_time = rtn_msg_interval * 3
     retracted_prefix_hold_time = rtn_msg_interval * 12  # TODO TBD
     max_full_update_interval = 0  # 0 => disables partial updates
+    enable_full_only_mode = False
 
     DEFAULT_CONFIG = {
         'rtn-msg-interval': rtn_msg_hold_time,
@@ -41,6 +43,7 @@ class DefaultConfiguration(object):
         'rtn-msg-hold-time': rtn_msg_hold_time,
         'retracted-prefix-hold-time': retracted_prefix_hold_time,
         'max-full-update-interval': max_full_update_interval,
+        'enable-full-only-mode': enable_full_only_mode,
     }
 
     # default bandwidth for a given interface in bytes/second
