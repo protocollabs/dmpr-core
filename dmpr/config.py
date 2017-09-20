@@ -15,11 +15,11 @@ default config are not required.
     "proto-transport-enable": ["v4"],
     "interfaces": [
         {
-            "name": "wlan0", "addr-v4": "10.0.0.1",
+            "name": "wlan0", "addr-v4": "10.0.0.1", "asymm-detection": False,
             "link-attributes": {"bandwidth": 100000, "loss": 0}
         },
         {
-            "name": "tetra0", "addr-v4": "10.0.0.1",
+            "name": "tetra0", "addr-v4": "10.0.0.1", "asymm-detection": True,
             "link-attributes": {"bandwidth": 10000, "loss": 0}
         }
     ],
@@ -127,6 +127,8 @@ class DefaultConfiguration(object):
             if "addr-v4" not in interface_data:
                 msg = "interfaces entry must contain at least a \"addr-v4\""
                 raise ConfigurationException(msg)
+            if "asymm-detection" not in interface_data:
+                interface_data["asymm-detection"] = False
             converted_interfaces[interface_data['name']] = interface_data
 
             orig_attr = interface_data.setdefault('link-attributes', {})
