@@ -63,6 +63,8 @@ class DMPR(object):
 
         self._started = False
         self._conf = None
+        self.id = None
+        self.interfaces = None
         self._get_time = self._dummy_cb
         self._routing_table_update_func = self._dummy_cb
         self._packet_tx_func = self._dummy_cb
@@ -99,13 +101,13 @@ class DMPR(object):
         if self._conf is None:
             msg = "Please register a configuration before starting"
             raise ConfigurationException(msg)
-        self.log = self._logger.getChild(self._conf['id'])
+        self.log = self._logger.getChild(self.id)
 
         self.log.info("starting DMPR core")
         self._reset()
 
-        for interface in self._conf['interfaces']:
-            self.msg_db[self._conf['interfaces'][interface]['name']] = dict()
+        for interface in self.interfaces:
+            self.msg_db[self.interfaces[interface]['name']] = dict()
 
         self._calc_next_tx_time()
         self._started = True
@@ -131,6 +133,9 @@ class DMPR(object):
         self._conf = DefaultConfiguration.validate_config(configuration)
 
         self.trace('config.new', self._conf)
+
+        self.id = self._conf['id']
+        self.interfaces = self._conf['interfaces']
 
         if self._started:
             self.log.info('configuration changed, restarting')
@@ -169,7 +174,7 @@ class DMPR(object):
 
         self.trace('rx.msg', msg)
 
-        if interface_name not in self._conf['interfaces']:
+        if interface_name not in self.interfaces:
             emsg = "interface {} is not configured, ignoring message"
             self.log.warning(emsg.format(interface_name))
             return
@@ -180,8 +185,8 @@ class DMPR(object):
         new_neighbor = msg['id'] not in self.msg_db[interface_name]
         try:
             if new_neighbor:
-                interface = self._conf['interfaces'][interface_name]
-                message = Message(msg, interface, self._conf['id'], self.now())
+                interface = self.interfaces[interface_name]
+                message = Message(msg, interface, self.id, self.now())
                 self.msg_db[interface_name][msg['id']] = message
                 self.state.update_required = True
             else:
@@ -202,11 +207,11 @@ class DMPR(object):
 
     def _process_full_requests(self, msg: dict):
         """
-        Check the received request-full field for itself or True and
+        Check the received request-full field for our id or True and
         schedule a full update if necessary
         """
         request = msg['request-full']
-        if (isinstance(request, list) and self._conf['id'] in request) or \
+        if (isinstance(request, list) and self.id in request) or \
                 (isinstance(request, bool) and request):
             self.state.next_full_update = 0
             self.state.full_request_queue.append(self.now())
@@ -329,16 +334,15 @@ class DMPR(object):
         # message, for paths we want to include all available paths
         newest_seq_no = {}
         for interface in self.msg_db:
-            asymm_detection = self._conf['interfaces'][interface][
-                'asymm-detection']
+            asymm_detection = self.interfaces[interface]['asymm-detection']
 
             for neighbor, msg in self.msg_db[interface].items():
                 # Check for a reflected sequence number from our node.
                 # Currently does not evaluate the actual sequence number
                 # as we depend on the hold timer to remove unstable, but
                 # sometimes symmetric links
-                reflected_seq = (self._conf['id'] in msg.reflected) and \
-                                ('seq' in msg.reflected[self._conf['id']])
+                reflected_seq = (self.id in msg.reflected) and \
+                                ('seq' in msg.reflected[self.id])
                 if asymm_detection and not reflected_seq:
                     continue
 
@@ -370,13 +374,13 @@ class DMPR(object):
         """
         Get the path to a direct neighbor
         """
-        interface = self._conf['interfaces'][interface_name]
+        interface = self.interfaces[interface_name]
         path = Path(path=neighbor,
                     attributes=LinkAttributes(),
                     next_hop=neighbor,
                     next_hop_interface=interface_name)
 
-        path.append(self._conf['id'], interface_name,
+        path.append(self.id, interface_name,
                     interface['link-attributes'])
         return path
 
@@ -559,7 +563,7 @@ in current | in retracted | msg retracted |
         Generate a new routing packet and call the msg_tx_cb callback
         """
         self._inc_seq_no()
-        for interface in self._conf['interfaces']:
+        for interface in self.interfaces:
             msg = self._create_routing_msg(interface)
             self.trace('tx.msg', msg)
 
@@ -587,12 +591,12 @@ in current | in retracted | msg retracted |
         Create a new full update packet
         """
         packet = {
-            'id': self._conf['id'],
+            'id': self.id,
             'seq': self.state.seq_no,
             'type': 'full',
         }
 
-        interface = self._conf['interfaces'][interface_name]
+        interface = self.interfaces[interface_name]
         if 'addr-v4' in interface:
             packet['addr-v4'] = interface['addr-v4']
         if 'addr-v6' in interface:
@@ -658,7 +662,7 @@ in current | in retracted | msg retracted |
         Create a partial update based on the last full message
         """
         packet = {
-            'id': self._conf['id'],
+            'id': self.id,
             'seq': self.state.seq_no,
             'type': 'partial',
         }
@@ -667,7 +671,7 @@ in current | in retracted | msg retracted |
         packet['partial-base'] = base_msg['seq']
 
         # Add changed interface address data
-        interface = self._conf['interfaces'][interface_name]
+        interface = self.interfaces[interface_name]
         for addr in ('addr-v4', 'addr-v6'):
             if addr in interface:
                 if addr in base_msg:
@@ -787,7 +791,7 @@ in current | in retracted | msg retracted |
     def _get_reflect_requests(self, interface_name: str) -> dict:
         reflect = {}
 
-        if self._conf['interfaces'][interface_name]['asymm-detection']:
+        if self.interfaces[interface_name]['asymm-detection']:
             reflect['seq'] = self.state.seq_no
 
         return reflect
