@@ -329,7 +329,19 @@ class DMPR(object):
         # message, for paths we want to include all available paths
         newest_seq_no = {}
         for interface in self.msg_db:
+            asymm_detection = self._conf['interfaces'][interface][
+                'asymm-detection']
+
             for neighbor, msg in self.msg_db[interface].items():
+                # Check for a reflected sequence number from our node.
+                # Currently does not evaluate the actual sequence number
+                # as we depend on the hold timer to remove unstable, but
+                # sometimes symmetric links
+                reflected_seq = (self._conf['id'] in msg.reflected) and \
+                                ('seq' in msg.reflected[self._conf['id']])
+                if asymm_detection and not reflected_seq:
+                    continue
+
                 # Add the neighbor as path and node to our lists
                 neighbor_paths = paths.setdefault(neighbor, [])
                 path = self._get_neighbor_path(interface, neighbor)
