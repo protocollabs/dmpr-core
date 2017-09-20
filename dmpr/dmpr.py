@@ -632,6 +632,10 @@ in current | in retracted | msg retracted |
         if request_full:
             packet['request-full'] = request_full
 
+        reflect = self._get_reflect_requests(interface_name)
+        if reflect:
+            packet['reflect'] = reflect
+
         if self.reflections:
             packet['reflected'] = self.reflections
 
@@ -736,6 +740,10 @@ in current | in retracted | msg retracted |
         if reflections:
             packet['reflected'] = reflections
 
+        reflect = self._get_reflect_requests(interface_name)
+        if reflect:
+            packet['reflect'] = reflect
+
         return packet
 
     def _prepare_networks(self) -> dict:
@@ -763,6 +771,14 @@ in current | in retracted | msg retracted |
             result = list(set(self.state.request_full_update))
         self.state.request_full_update = []
         return result
+
+    def _get_reflect_requests(self, interface_name: str) -> dict:
+        reflect = {}
+
+        if self._conf['interfaces'][interface_name]['asymm-detection']:
+            reflect['seq'] = self.state.seq_no
+
+        return reflect
 
     def _inc_seq_no(self):
         self.state.seq_no += 1
