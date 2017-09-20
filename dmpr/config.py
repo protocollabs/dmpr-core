@@ -1,5 +1,9 @@
-# example configuration for DMPR daemon
-exa_conf = {
+"""
+This module defines the default configuration of DMPR.
+
+This is how a configuration looks like. Note that keys for which there is a
+default config are not required.
+{
     "id": "ace80ef4-d284-11e6-bf26-cec0c932ce01",
     "rtn-msg-interval": 30,
     "rtn-msg-interval-jitter": 7,
@@ -12,11 +16,11 @@ exa_conf = {
     "interfaces": [
         {
             "name": "wlan0", "addr-v4": "10.0.0.1",
-            "link-characteristics": {"bandwidth": 100000, "loss": 0}
+            "link-attributes": {"bandwidth": 100000, "loss": 0}
         },
         {
             "name": "tetra0", "addr-v4": "10.0.0.1",
-            "link-characteristics": {"bandwidth": 10000, "loss": 0}
+            "link-attributes": {"bandwidth": 10000, "loss": 0}
         }
     ],
     "networks": [
@@ -27,6 +31,7 @@ exa_conf = {
         {"proto": "v6", "prefix": "fd6a:6ad:b07f:ffff::", "prefix-len": "64"}
     ],
 }
+"""
 
 
 class DefaultConfiguration(object):

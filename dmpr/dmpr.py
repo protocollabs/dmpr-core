@@ -1,3 +1,7 @@
+"""
+The core of dmpr. This module holds the states and uses callbacks to
+communicate with a daemon or the simulator.
+"""
 import collections
 import copy
 import functools
@@ -30,8 +34,11 @@ class NoOpTracer(object):
 
 
 class DMPRState(object):
+    """
+    Encapsulate the state of the core, easy to reset and does not pollute the
+    namespace of the DMPR class.
+    """
     def __init__(self):
-        # Router state
         self.seq_no = 0
 
         # routing data state
@@ -49,6 +56,12 @@ class DMPRState(object):
 
 
 class DMPR(object):
+    """
+    The core class. Before starting the core, you must register a configuration
+    with DMPR.register_configuration and at least one policy with
+    DMPR.register_policy. Also to use it in any meaningful way the callbacks
+    register_msg_tx_cb and register_routing_table_update_cb should be added.
+    """
     def __init__(self, log=logger, tracer=NoOpTracer()):
         self.tracer = tracer
         self._logger = log

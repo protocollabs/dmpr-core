@@ -35,8 +35,9 @@ class BaseMessage(object):
 
 class Message(BaseMessage):
     """
-    This class handles new full and partial messages as well as
-    message validation
+    This class encapsulate a neighbor and is capable of replacing the data
+    when a full update arrives as well as applying partial updates.
+    It also handles message validation.
     """
 
     def __init__(self, msg: dict, interface: dict, router_id: str, rx_time):
