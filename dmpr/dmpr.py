@@ -3,9 +3,6 @@ The core of dmpr. This module holds the states and uses callbacks to
 communicate with a daemon or the simulator.
 """
 import collections
-import copy
-import functools
-import ipaddress
 import logging
 import random
 
@@ -21,11 +18,6 @@ logger = logging.getLogger(__name__)
 FULL_MODE_ANALYSE_HISTORY = 10
 FULL_MODE_TRIGGER_THRESH = 100
 FULL_MODE_TIME = 1000
-
-
-@functools.lru_cache(maxsize=1024)
-def normalize_network(network):
-    return str(ipaddress.ip_network(network, strict=False))
 
 
 class NoOpTracer(object):
@@ -136,101 +128,13 @@ class DMPR(object):
         an error when values are wrongly configured
         restarts dmpr if it was running
         """
-        self._conf = self._validate_config(configuration)
+        self._conf = DefaultConfiguration.validate_config(configuration)
 
         self.trace('config.new', self._conf)
 
         if self._started:
             self.log.info('configuration changed, restarting')
             self.restart()
-
-    @staticmethod
-    def _validate_config(configuration: dict) -> dict:
-        """
-        convert external python dict configuration into internal
-        configuration, check and set default values
-        """
-        if not isinstance(configuration, dict):
-            raise ConfigurationException("configuration must be dict-like")
-
-        config = copy.deepcopy(DefaultConfiguration.DEFAULT_CONFIG)
-
-        config.update(configuration)
-
-        if "id" not in config:
-            msg = "configuration contains no id! A id must be unique, it can be \
-                   randomly generated but for better performance and debugging \
-                   capabilities this generated ID should be saved permanently \
-                   (e.g. at a local file) to survive daemon restarts"
-            raise ConfigurationException(msg)
-
-        if not isinstance(config["id"], str):
-            msg = "id must be a string!"
-            raise ConfigurationException(msg)
-
-        interfaces = config.get('interfaces', False)
-        if not isinstance(interfaces, list):
-            msg = "No interface configured, a list of at least on is required"
-            raise ConfigurationException(msg)
-
-        converted_interfaces = {}
-        config['interfaces'] = converted_interfaces
-        for interface_data in interfaces:
-            if not isinstance(interface_data, dict):
-                msg = "interface entry must be dict: {}".format(
-                    interface_data)
-                raise ConfigurationException(msg)
-            if "name" not in interface_data:
-                msg = "interfaces entry must contain at least a \"name\""
-                raise ConfigurationException(msg)
-            if "addr-v4" not in interface_data:
-                msg = "interfaces entry must contain at least a \"addr-v4\""
-                raise ConfigurationException(msg)
-            converted_interfaces[interface_data['name']] = interface_data
-
-            orig_attr = interface_data.setdefault('link-attributes', {})
-            attributes = copy.deepcopy(DefaultConfiguration.DEFAULT_ATTRIBUTES)
-            attributes.update(orig_attr)
-            interface_data['link-attributes'] = attributes
-
-        networks = config.get('networks', False)
-        if networks:
-            converted_networks = {}
-            config['networks'] = converted_networks
-
-            if not isinstance(networks, list):
-                msg = "networks must be a list!"
-                raise ConfigurationException(msg)
-
-            for network in configuration["networks"]:
-                if not isinstance(network, dict):
-                    msg = "interface entry must be dict: {}".format(network)
-                    raise ConfigurationException(msg)
-                if "proto" not in network:
-                    msg = "network must contain proto key: {}".format(
-                        network)
-                    raise ConfigurationException(msg)
-                if "prefix" not in network:
-                    msg = "network must contain prefix key: {}".format(
-                        network)
-                    raise ConfigurationException(msg)
-                if "prefix-len" not in network:
-                    msg = "network must contain prefix-len key: {}".format(
-                        network)
-                    raise ConfigurationException(msg)
-
-                addr = '{}/{}'.format(network['prefix'], network['prefix-len'])
-                converted_networks[normalize_network(addr)] = False
-
-        if "mcast-v4-tx-addr" not in config:
-            msg = "no mcast-v4-tx-addr configured!"
-            raise ConfigurationException(msg)
-
-        if "mcast-v6-tx-addr" not in config:
-            msg = "no mcast-v6-tx-addr configured!"
-            raise ConfigurationException(msg)
-
-        return config
 
     def register_get_time_cb(self, func: callable):
         """
