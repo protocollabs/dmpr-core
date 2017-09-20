@@ -1,10 +1,13 @@
-# Dynamic Multipath Routing Core - Reference Implementation
+# Dynamic MultiPath Routing Core - Reference Implementation
 
-This project implements the *Dynamic Multipath Routing* core protocol. It is
+This project implements the *Dynamic MultiPath Routing* core protocol. It is
 intended to be used within network simulators or other drivers.
 
-# Requirements
+## Requirements
 
-Python3, no other packages are required.
+Python >= 3.4
 
+## Documentation
 
+See [protocollabs/dmpr-documentation](https://github.com/protocollabs/dmpr-documentation)
+and [protocollabs/ietf-drafts](https://github.com/protocollabs/ietf-drafts)
