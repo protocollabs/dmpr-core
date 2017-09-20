@@ -7,7 +7,10 @@ def dict_reverse_lookup(d: dict, value):
 
 class LinkAttributes(dict):
     """
-    This class is here mainly for caching reasons
+    This class is here mainly for caching reasons. The link attributes are
+    the same for each Path in a packet. Therefore we can use one instance of
+    this class per Packet and don't need to copy it every time. This also
+    caches the next available id.
     """
 
     def __init__(self, attributes=None):
@@ -38,6 +41,11 @@ class Path(object):
 
     def __init__(self, path: str, attributes: LinkAttributes,
                  next_hop: str, next_hop_interface: str):
+        """
+        Create a new path from the string representation.
+
+        also saves the next hop and the responsible interface
+        """
         path = path.split('>')
         if len(path) % 2 != 1:
             raise InternalException("Invalid path: {}".format(path))
@@ -98,7 +106,7 @@ class Path(object):
 
         return result
 
-    def __eq__(self, other):
+    def __eq__(self, other) -> bool:
         """
         Two paths are equal if they share the same nodes
         over links with the same attributes

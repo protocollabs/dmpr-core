@@ -38,6 +38,7 @@ class DMPRState(object):
     Encapsulate the state of the core, easy to reset and does not pollute the
     namespace of the DMPR class.
     """
+
     def __init__(self):
         self.seq_no = 0
 
@@ -62,6 +63,7 @@ class DMPR(object):
     DMPR.register_policy. Also to use it in any meaningful way the callbacks
     register_msg_tx_cb and register_routing_table_update_cb should be added.
     """
+
     def __init__(self, log=logger, tracer=NoOpTracer()):
         self.tracer = tracer
         self._logger = log
@@ -120,11 +122,11 @@ class DMPR(object):
         self.stop()
         self.start()
 
-    def register_policy(self, policy):
+    def register_policy(self, policy: AbstractPolicy):
         if policy not in self.policies:
             self.policies.append(policy)
 
-    def remove_policy(self, policy):
+    def remove_policy(self, policy: AbstractPolicy):
         if policy in self.policies:
             self.policies.remove(policy)
 
@@ -230,26 +232,26 @@ class DMPR(object):
 
         return config
 
-    def register_get_time_cb(self, function):
+    def register_get_time_cb(self, func: callable):
         """
         Register a callback for the given time, this functions
         must not need any arguments
         """
-        self._get_time = function
+        self._get_time = func
 
-    def register_routing_table_update_cb(self, function):
+    def register_routing_table_update_cb(self, func: callable):
         """
         Register a callback for route updates, the signature should be:
         function(routing_table: dict)
         """
-        self._routing_table_update_func = function
+        self._routing_table_update_func = func
 
-    def register_msg_tx_cb(self, function):
+    def register_msg_tx_cb(self, func: callable):
         """
         Register a callback for sending messages, the signature should be:
         function(interface: str, ipversion: str, mcast_addr: str, msg: dict)
         """
-        self._packet_tx_func = function
+        self._packet_tx_func = func
 
     ##################
     #  dmpr rx path  #
@@ -331,7 +333,7 @@ class DMPR(object):
             'routing-table': self.routing_table,
         })
 
-    def _compute_routing_data(self, policy):
+    def _compute_routing_data(self, policy: AbstractPolicy):
         """
         compute new routing data based on all messages
         in the message database
@@ -365,7 +367,7 @@ class DMPR(object):
             node_networks_entry = node_entry.setdefault('networks', {})
             node_networks_entry.update(self._update_network_data(node_networks))
 
-    def _compute_routing_table(self, policy):
+    def _compute_routing_table(self, policy: AbstractPolicy):
         """
         compute a new routing table based on the routing data
         """
@@ -399,7 +401,7 @@ class DMPR(object):
                     msg = "node {node} advertises IPv{version} network but " \
                           "has no IPv{version} address"
                     self.log.warning(msg.format(node=node,
-                                              version=version))
+                                                version=version))
                     continue
 
                 routing_table.append({
@@ -448,7 +450,7 @@ class DMPR(object):
 
         return paths, networks, reflections
 
-    def _get_neighbor_path(self, interface_name: str, neighbor: str):
+    def _get_neighbor_path(self, interface_name: str, neighbor: str) -> Path:
         """
         Get the path to a direct neighbor
         """
@@ -638,7 +640,7 @@ in current | in retracted | msg retracted |
 
     def tx_route_packet(self):
         """
-        Generate and send a new routing packet
+        Generate a new routing packet and call the msg_tx_cb callback
         """
         self._inc_seq_no()
         for interface in self._conf['interfaces']:
