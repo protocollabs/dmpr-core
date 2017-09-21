@@ -54,7 +54,7 @@ class DefaultConfiguration(object):
     enable_full_only_mode = False
 
     DEFAULT_CONFIG = {
-        'rtn-msg-interval': rtn_msg_hold_time,
+        'rtn-msg-interval': rtn_msg_interval,
         'rtn-msg-interval-jitter': rtn_msg_interval_jitter,
         'rtn-msg-hold-time': rtn_msg_hold_time,
         'retracted-prefix-hold-time': retracted_prefix_hold_time,
