@@ -65,7 +65,7 @@ class SimpleBandwidthPolicy(AbstractPolicy):
         return min(path.attributes[link]['bandwidth'] for link in path.links)
 
     @AbstractPolicy.with_path_cache
-    def path_cmp_key(self, path: Path):
+    def path_cmp_key(self, path: Path) -> float:
         # the minimum bandwidth of the path while slightly preferring
         # shorter paths
         return - self._acc_bw(path) * 0.99 ** len(path.links)

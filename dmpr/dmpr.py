@@ -1,7 +1,8 @@
+"""
+The core of dmpr. This module holds the states and uses callbacks to
+communicate with a daemon or the simulator.
+"""
 import collections
-import copy
-import functools
-import ipaddress
 import logging
 import random
 
@@ -19,19 +20,18 @@ FULL_MODE_TRIGGER_THRESH = 100
 FULL_MODE_TIME = 1000
 
 
-@functools.lru_cache(maxsize=1024)
-def normalize_network(network):
-    return str(ipaddress.ip_network(network, strict=False))
-
-
 class NoOpTracer(object):
     def log(self, tracepoint, msg, time):
         pass
 
 
 class DMPRState(object):
+    """
+    Encapsulate the state of the core, easy to reset and does not pollute the
+    namespace of the DMPR class.
+    """
+
     def __init__(self):
-        # Router state
         self.seq_no = 0
 
         # routing data state
@@ -49,6 +49,13 @@ class DMPRState(object):
 
 
 class DMPR(object):
+    """
+    The core class. Before starting the core, you must register a configuration
+    with DMPR.register_configuration and at least one policy with
+    DMPR.register_policy. Also to use it in any meaningful way the callbacks
+    register_msg_tx_cb and register_routing_table_update_cb should be added.
+    """
+
     def __init__(self, log=logger, tracer=NoOpTracer()):
         self.tracer = tracer
         self._logger = log
@@ -56,6 +63,8 @@ class DMPR(object):
 
         self._started = False
         self._conf = None
+        self.id = None
+        self.interfaces = None
         self._get_time = self._dummy_cb
         self._routing_table_update_func = self._dummy_cb
         self._packet_tx_func = self._dummy_cb
@@ -92,13 +101,13 @@ class DMPR(object):
         if self._conf is None:
             msg = "Please register a configuration before starting"
             raise ConfigurationException(msg)
-        self.log = self._logger.getChild(self._conf['id'])
+        self.log = self._logger.getChild(self.id)
 
         self.log.info("starting DMPR core")
         self._reset()
 
-        for interface in self._conf['interfaces']:
-            self.msg_db[self._conf['interfaces'][interface]['name']] = dict()
+        for interface in self.interfaces:
+            self.msg_db[self.interfaces[interface]['name']] = dict()
 
         self._calc_next_tx_time()
         self._started = True
@@ -107,11 +116,11 @@ class DMPR(object):
         self.stop()
         self.start()
 
-    def register_policy(self, policy):
+    def register_policy(self, policy: AbstractPolicy):
         if policy not in self.policies:
             self.policies.append(policy)
 
-    def remove_policy(self, policy):
+    def remove_policy(self, policy: AbstractPolicy):
         if policy in self.policies:
             self.policies.remove(policy)
 
@@ -121,122 +130,37 @@ class DMPR(object):
         an error when values are wrongly configured
         restarts dmpr if it was running
         """
-        self._conf = self._validate_config(configuration)
+        self._conf = DefaultConfiguration.validate_config(configuration)
 
         self.trace('config.new', self._conf)
+
+        self.id = self._conf['id']
+        self.interfaces = self._conf['interfaces']
 
         if self._started:
             self.log.info('configuration changed, restarting')
             self.restart()
 
-    @staticmethod
-    def _validate_config(configuration: dict) -> dict:
-        """
-        convert external python dict configuration into internal
-        configuration, check and set default values
-        """
-        if not isinstance(configuration, dict):
-            raise ConfigurationException("configuration must be dict-like")
-
-        config = copy.deepcopy(DefaultConfiguration.DEFAULT_CONFIG)
-
-        config.update(configuration)
-
-        if "id" not in config:
-            msg = "configuration contains no id! A id must be unique, it can be \
-                   randomly generated but for better performance and debugging \
-                   capabilities this generated ID should be saved permanently \
-                   (e.g. at a local file) to survive daemon restarts"
-            raise ConfigurationException(msg)
-
-        if not isinstance(config["id"], str):
-            msg = "id must be a string!"
-            raise ConfigurationException(msg)
-
-        interfaces = config.get('interfaces', False)
-        if not isinstance(interfaces, list):
-            msg = "No interface configured, a list of at least on is required"
-            raise ConfigurationException(msg)
-
-        converted_interfaces = {}
-        config['interfaces'] = converted_interfaces
-        for interface_data in interfaces:
-            if not isinstance(interface_data, dict):
-                msg = "interface entry must be dict: {}".format(
-                    interface_data)
-                raise ConfigurationException(msg)
-            if "name" not in interface_data:
-                msg = "interfaces entry must contain at least a \"name\""
-                raise ConfigurationException(msg)
-            if "addr-v4" not in interface_data:
-                msg = "interfaces entry must contain at least a \"addr-v4\""
-                raise ConfigurationException(msg)
-            converted_interfaces[interface_data['name']] = interface_data
-
-            orig_attr = interface_data.setdefault('link-attributes', {})
-            attributes = copy.deepcopy(DefaultConfiguration.DEFAULT_ATTRIBUTES)
-            attributes.update(orig_attr)
-            interface_data['link-attributes'] = attributes
-
-        networks = config.get('networks', False)
-        if networks:
-            converted_networks = {}
-            config['networks'] = converted_networks
-
-            if not isinstance(networks, list):
-                msg = "networks must be a list!"
-                raise ConfigurationException(msg)
-
-            for network in configuration["networks"]:
-                if not isinstance(network, dict):
-                    msg = "interface entry must be dict: {}".format(network)
-                    raise ConfigurationException(msg)
-                if "proto" not in network:
-                    msg = "network must contain proto key: {}".format(
-                        network)
-                    raise ConfigurationException(msg)
-                if "prefix" not in network:
-                    msg = "network must contain prefix key: {}".format(
-                        network)
-                    raise ConfigurationException(msg)
-                if "prefix-len" not in network:
-                    msg = "network must contain prefix-len key: {}".format(
-                        network)
-                    raise ConfigurationException(msg)
-
-                addr = '{}/{}'.format(network['prefix'], network['prefix-len'])
-                converted_networks[normalize_network(addr)] = False
-
-        if "mcast-v4-tx-addr" not in config:
-            msg = "no mcast-v4-tx-addr configured!"
-            raise ConfigurationException(msg)
-
-        if "mcast-v6-tx-addr" not in config:
-            msg = "no mcast-v6-tx-addr configured!"
-            raise ConfigurationException(msg)
-
-        return config
-
-    def register_get_time_cb(self, function):
+    def register_get_time_cb(self, func: callable):
         """
         Register a callback for the given time, this functions
         must not need any arguments
         """
-        self._get_time = function
+        self._get_time = func
 
-    def register_routing_table_update_cb(self, function):
+    def register_routing_table_update_cb(self, func: callable):
         """
         Register a callback for route updates, the signature should be:
         function(routing_table: dict)
         """
-        self._routing_table_update_func = function
+        self._routing_table_update_func = func
 
-    def register_msg_tx_cb(self, function):
+    def register_msg_tx_cb(self, func: callable):
         """
         Register a callback for sending messages, the signature should be:
         function(interface: str, ipversion: str, mcast_addr: str, msg: dict)
         """
-        self._packet_tx_func = function
+        self._packet_tx_func = func
 
     ##################
     #  dmpr rx path  #
@@ -250,7 +174,7 @@ class DMPR(object):
 
         self.trace('rx.msg', msg)
 
-        if interface_name not in self._conf['interfaces']:
+        if interface_name not in self.interfaces:
             emsg = "interface {} is not configured, ignoring message"
             self.log.warning(emsg.format(interface_name))
             return
@@ -261,8 +185,8 @@ class DMPR(object):
         new_neighbor = msg['id'] not in self.msg_db[interface_name]
         try:
             if new_neighbor:
-                interface = self._conf['interfaces'][interface_name]
-                message = Message(msg, interface, self._conf['id'], self.now())
+                interface = self.interfaces[interface_name]
+                message = Message(msg, interface, self.id, self.now())
                 self.msg_db[interface_name][msg['id']] = message
                 self.state.update_required = True
             else:
@@ -283,11 +207,11 @@ class DMPR(object):
 
     def _process_full_requests(self, msg: dict):
         """
-        Check the received request-full field for itself or True and
+        Check the received request-full field for our id or True and
         schedule a full update if necessary
         """
         request = msg['request-full']
-        if (isinstance(request, list) and self._conf['id'] in request) or \
+        if (isinstance(request, list) and self.id in request) or \
                 (isinstance(request, bool) and request):
             self.state.next_full_update = 0
             self.state.full_request_queue.append(self.now())
@@ -318,7 +242,7 @@ class DMPR(object):
             'routing-table': self.routing_table,
         })
 
-    def _compute_routing_data(self, policy):
+    def _compute_routing_data(self, policy: AbstractPolicy):
         """
         compute new routing data based on all messages
         in the message database
@@ -352,7 +276,7 @@ class DMPR(object):
             node_networks_entry = node_entry.setdefault('networks', {})
             node_networks_entry.update(self._update_network_data(node_networks))
 
-    def _compute_routing_table(self, policy):
+    def _compute_routing_table(self, policy: AbstractPolicy):
         """
         compute a new routing table based on the routing data
         """
@@ -386,7 +310,7 @@ class DMPR(object):
                     msg = "node {node} advertises IPv{version} network but " \
                           "has no IPv{version} address"
                     self.log.warning(msg.format(node=node,
-                                              version=version))
+                                                version=version))
                     continue
 
                 routing_table.append({
@@ -410,7 +334,18 @@ class DMPR(object):
         # message, for paths we want to include all available paths
         newest_seq_no = {}
         for interface in self.msg_db:
+            asymm_detection = self.interfaces[interface]['asymm-detection']
+
             for neighbor, msg in self.msg_db[interface].items():
+                # Check for a reflected sequence number from our node.
+                # Currently does not evaluate the actual sequence number
+                # as we depend on the hold timer to remove unstable, but
+                # sometimes symmetric links
+                reflected_seq = (self.id in msg.reflected) and \
+                                ('seq' in msg.reflected[self.id])
+                if asymm_detection and not reflected_seq:
+                    continue
+
                 # Add the neighbor as path and node to our lists
                 neighbor_paths = paths.setdefault(neighbor, [])
                 path = self._get_neighbor_path(interface, neighbor)
@@ -435,17 +370,17 @@ class DMPR(object):
 
         return paths, networks, reflections
 
-    def _get_neighbor_path(self, interface_name: str, neighbor: str):
+    def _get_neighbor_path(self, interface_name: str, neighbor: str) -> Path:
         """
         Get the path to a direct neighbor
         """
-        interface = self._conf['interfaces'][interface_name]
+        interface = self.interfaces[interface_name]
         path = Path(path=neighbor,
                     attributes=LinkAttributes(),
                     next_hop=neighbor,
                     next_hop_interface=interface_name)
 
-        path.append(self._conf['id'], interface_name,
+        path.append(self.id, interface_name,
                     interface['link-attributes'])
         return path
 
@@ -625,10 +560,10 @@ in current | in retracted | msg retracted |
 
     def tx_route_packet(self):
         """
-        Generate and send a new routing packet
+        Generate a new routing packet and call the msg_tx_cb callback
         """
         self._inc_seq_no()
-        for interface in self._conf['interfaces']:
+        for interface in self.interfaces:
             msg = self._create_routing_msg(interface)
             self.trace('tx.msg', msg)
 
@@ -656,12 +591,12 @@ in current | in retracted | msg retracted |
         Create a new full update packet
         """
         packet = {
-            'id': self._conf['id'],
+            'id': self.id,
             'seq': self.state.seq_no,
             'type': 'full',
         }
 
-        interface = self._conf['interfaces'][interface_name]
+        interface = self.interfaces[interface_name]
         if 'addr-v4' in interface:
             packet['addr-v4'] = interface['addr-v4']
         if 'addr-v6' in interface:
@@ -713,6 +648,10 @@ in current | in retracted | msg retracted |
         if request_full:
             packet['request-full'] = request_full
 
+        reflect = self._get_reflect_requests(interface_name)
+        if reflect:
+            packet['reflect'] = reflect
+
         if self.reflections:
             packet['reflected'] = self.reflections
 
@@ -723,7 +662,7 @@ in current | in retracted | msg retracted |
         Create a partial update based on the last full message
         """
         packet = {
-            'id': self._conf['id'],
+            'id': self.id,
             'seq': self.state.seq_no,
             'type': 'partial',
         }
@@ -732,7 +671,7 @@ in current | in retracted | msg retracted |
         packet['partial-base'] = base_msg['seq']
 
         # Add changed interface address data
-        interface = self._conf['interfaces'][interface_name]
+        interface = self.interfaces[interface_name]
         for addr in ('addr-v4', 'addr-v6'):
             if addr in interface:
                 if addr in base_msg:
@@ -817,6 +756,10 @@ in current | in retracted | msg retracted |
         if reflections:
             packet['reflected'] = reflections
 
+        reflect = self._get_reflect_requests(interface_name)
+        if reflect:
+            packet['reflect'] = reflect
+
         return packet
 
     def _prepare_networks(self) -> dict:
@@ -844,6 +787,14 @@ in current | in retracted | msg retracted |
             result = list(set(self.state.request_full_update))
         self.state.request_full_update = []
         return result
+
+    def _get_reflect_requests(self, interface_name: str) -> dict:
+        reflect = {}
+
+        if self.interfaces[interface_name]['asymm-detection']:
+            reflect['seq'] = self.state.seq_no
+
+        return reflect
 
     def _inc_seq_no(self):
         self.state.seq_no += 1

@@ -1,5 +1,9 @@
-# example configuration for DMPR daemon
-exa_conf = {
+"""
+This module defines the default configuration of DMPR.
+
+This is how a configuration looks like. Note that keys for which there is a
+default config are not required.
+{
     "id": "ace80ef4-d284-11e6-bf26-cec0c932ce01",
     "rtn-msg-interval": 30,
     "rtn-msg-interval-jitter": 7,
@@ -11,12 +15,12 @@ exa_conf = {
     "proto-transport-enable": ["v4"],
     "interfaces": [
         {
-            "name": "wlan0", "addr-v4": "10.0.0.1",
-            "link-characteristics": {"bandwidth": 100000, "loss": 0}
+            "name": "wlan0", "addr-v4": "10.0.0.1", "asymm-detection": False,
+            "link-attributes": {"bandwidth": 100000, "loss": 0}
         },
         {
-            "name": "tetra0", "addr-v4": "10.0.0.1",
-            "link-characteristics": {"bandwidth": 10000, "loss": 0}
+            "name": "tetra0", "addr-v4": "10.0.0.1", "asymm-detection": True,
+            "link-attributes": {"bandwidth": 10000, "loss": 0}
         }
     ],
     "networks": [
@@ -27,6 +31,18 @@ exa_conf = {
         {"proto": "v6", "prefix": "fd6a:6ad:b07f:ffff::", "prefix-len": "64"}
     ],
 }
+"""
+
+import copy
+import functools
+import ipaddress
+
+from core.dmpr.exceptions import ConfigurationException
+
+
+@functools.lru_cache(maxsize=1024)
+def normalize_network(network):
+    return str(ipaddress.ip_network(network, strict=False))
 
 
 class DefaultConfiguration(object):
@@ -68,3 +84,93 @@ class DefaultConfiguration(object):
         'loss': LINK_CHARACTERISTICS_LOSS,
         'cost': LINK_CHARACTERISTICS_COST,
     }
+
+    @staticmethod
+    def validate_config(configuration: dict) -> dict:
+        """
+        convert external python dict configuration into internal
+        configuration, check and set default values
+        """
+        if not isinstance(configuration, dict):
+            raise ConfigurationException("configuration must be dict-like")
+
+        config = copy.deepcopy(DefaultConfiguration.DEFAULT_CONFIG)
+
+        config.update(configuration)
+
+        if "id" not in config:
+            msg = "configuration contains no id! A id must be unique, it can be \
+                       randomly generated but for better performance and debugging \
+                       capabilities this generated ID should be saved permanently \
+                       (e.g. at a local file) to survive daemon restarts"
+            raise ConfigurationException(msg)
+
+        if not isinstance(config["id"], str):
+            msg = "id must be a string!"
+            raise ConfigurationException(msg)
+
+        interfaces = config.get('interfaces', False)
+        if not isinstance(interfaces, list):
+            msg = "No interface configured, a list of at least on is required"
+            raise ConfigurationException(msg)
+
+        converted_interfaces = {}
+        config['interfaces'] = converted_interfaces
+        for interface_data in interfaces:
+            if not isinstance(interface_data, dict):
+                msg = "interface entry must be dict: {}".format(
+                    interface_data)
+                raise ConfigurationException(msg)
+            if "name" not in interface_data:
+                msg = "interfaces entry must contain at least a \"name\""
+                raise ConfigurationException(msg)
+            if "addr-v4" not in interface_data:
+                msg = "interfaces entry must contain at least a \"addr-v4\""
+                raise ConfigurationException(msg)
+            if "asymm-detection" not in interface_data:
+                interface_data["asymm-detection"] = False
+            converted_interfaces[interface_data['name']] = interface_data
+
+            orig_attr = interface_data.setdefault('link-attributes', {})
+            attributes = copy.deepcopy(DefaultConfiguration.DEFAULT_ATTRIBUTES)
+            attributes.update(orig_attr)
+            interface_data['link-attributes'] = attributes
+
+        networks = config.get('networks', False)
+        if networks:
+            converted_networks = {}
+            config['networks'] = converted_networks
+
+            if not isinstance(networks, list):
+                msg = "networks must be a list!"
+                raise ConfigurationException(msg)
+
+            for network in configuration["networks"]:
+                if not isinstance(network, dict):
+                    msg = "interface entry must be dict: {}".format(network)
+                    raise ConfigurationException(msg)
+                if "proto" not in network:
+                    msg = "network must contain proto key: {}".format(
+                        network)
+                    raise ConfigurationException(msg)
+                if "prefix" not in network:
+                    msg = "network must contain prefix key: {}".format(
+                        network)
+                    raise ConfigurationException(msg)
+                if "prefix-len" not in network:
+                    msg = "network must contain prefix-len key: {}".format(
+                        network)
+                    raise ConfigurationException(msg)
+
+                addr = '{}/{}'.format(network['prefix'], network['prefix-len'])
+                converted_networks[normalize_network(addr)] = False
+
+        if "mcast-v4-tx-addr" not in config:
+            msg = "no mcast-v4-tx-addr configured!"
+            raise ConfigurationException(msg)
+
+        if "mcast-v6-tx-addr" not in config:
+            msg = "no mcast-v6-tx-addr configured!"
+            raise ConfigurationException(msg)
+
+        return config
