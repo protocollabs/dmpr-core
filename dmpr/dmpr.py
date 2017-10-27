@@ -64,7 +64,6 @@ class DMPR(object):
         self._started = False
         self._conf = None
         self.id = None
-        self.interfaces = None
         self._get_time = self._dummy_cb
         self._routing_table_update_func = self._dummy_cb
         self._packet_tx_func = self._dummy_cb
@@ -106,8 +105,8 @@ class DMPR(object):
         self.log.info("starting DMPR core")
         self._reset()
 
-        for interface in self.interfaces:
-            self.msg_db[self.interfaces[interface]['name']] = dict()
+        for interface in self._conf['interfaces']:
+            self.msg_db[self._conf['interfaces'][interface]['name']] = dict()
 
         self._calc_next_tx_time()
         self._started = True
@@ -135,7 +134,6 @@ class DMPR(object):
         self.trace('config.new', self._conf)
 
         self.id = self._conf['id']
-        self.interfaces = self._conf['interfaces']
 
         if self._started:
             self.log.info('configuration changed, restarting')
@@ -174,7 +172,7 @@ class DMPR(object):
 
         self.trace('rx.msg', msg)
 
-        if interface_name not in self.interfaces:
+        if interface_name not in self._conf['interfaces']:
             emsg = "interface {} is not configured, ignoring message"
             self.log.warning(emsg.format(interface_name))
             return
@@ -185,7 +183,7 @@ class DMPR(object):
         new_neighbor = msg['id'] not in self.msg_db[interface_name]
         try:
             if new_neighbor:
-                interface = self.interfaces[interface_name]
+                interface = self._conf['interfaces'][interface_name]
                 message = Message(msg, interface, self.id, self.now())
                 self.msg_db[interface_name][msg['id']] = message
                 self.state.update_required = True
@@ -334,7 +332,8 @@ class DMPR(object):
         # message, for paths we want to include all available paths
         newest_seq_no = {}
         for interface in self.msg_db:
-            asymm_detection = self.interfaces[interface]['asymm-detection']
+            asymm_detection = self._conf['interfaces'][interface][
+                'asymm-detection']
 
             for neighbor, msg in self.msg_db[interface].items():
                 # Check for a reflected sequence number from our node.
@@ -374,7 +373,7 @@ class DMPR(object):
         """
         Get the path to a direct neighbor
         """
-        interface = self.interfaces[interface_name]
+        interface = self._conf['interfaces'][interface_name]
         path = Path(path=neighbor,
                     attributes=LinkAttributes(),
                     next_hop=neighbor,
@@ -563,7 +562,7 @@ in current | in retracted | msg retracted |
         Generate a new routing packet and call the msg_tx_cb callback
         """
         self._inc_seq_no()
-        for interface in self.interfaces:
+        for interface in self._conf['interfaces']:
             msg = self._create_routing_msg(interface)
             self.trace('tx.msg', msg)
 
@@ -596,7 +595,7 @@ in current | in retracted | msg retracted |
             'type': 'full',
         }
 
-        interface = self.interfaces[interface_name]
+        interface = self._conf['interfaces'][interface_name]
         if 'addr-v4' in interface:
             packet['addr-v4'] = interface['addr-v4']
         if 'addr-v6' in interface:
@@ -671,7 +670,7 @@ in current | in retracted | msg retracted |
         packet['partial-base'] = base_msg['seq']
 
         # Add changed interface address data
-        interface = self.interfaces[interface_name]
+        interface = self._conf['interfaces'][interface_name]
         for addr in ('addr-v4', 'addr-v6'):
             if addr in interface:
                 if addr in base_msg:
@@ -791,7 +790,7 @@ in current | in retracted | msg retracted |
     def _get_reflect_requests(self, interface_name: str) -> dict:
         reflect = {}
 
-        if self.interfaces[interface_name]['asymm-detection']:
+        if self._conf['interfaces'][interface_name]['asymm-detection']:
             reflect['seq'] = self.state.seq_no
 
         return reflect
