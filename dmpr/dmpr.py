@@ -802,12 +802,12 @@ in current | in retracted | msg retracted |
         """
         Set the next transmit time
         """
-        interval = self._conf["rtn-msg-interval"]
+        interval = int(self._conf["rtn-msg-interval"])
         if self.state.next_tx_time is None:
             # first time transmitting, just wait jitter to join network faster
             interval = 0
 
-        jitter = self._conf["rtn-msg-interval-jitter"]
+        jitter = int(self._conf["rtn-msg-interval-jitter"])
         wait_time = interval + random.random() * jitter
         now = self.now()
         self.state.next_tx_time = now + wait_time
