@@ -170,6 +170,8 @@ class DMPR(object):
         database and trigger all recalculations
         """
 
+        # print("RX from {} msg {}\n".format(interface_name, msg))
+
         self.trace('rx.msg', msg)
 
         if interface_name not in self._conf['interfaces']:
@@ -247,7 +249,6 @@ class DMPR(object):
         """
 
         routing_data = {}
-        self.routing_data[policy.name] = routing_data
 
         paths, networks, reflections = self._parse_msg_db(policy)
         self.reflections = reflections
@@ -274,12 +275,13 @@ class DMPR(object):
             node_networks_entry = node_entry.setdefault('networks', {})
             node_networks_entry.update(self._update_network_data(node_networks))
 
+        self.routing_data[policy.name] = routing_data
+
     def _compute_routing_table(self, policy: AbstractPolicy):
         """
         compute a new routing table based on the routing data
         """
         routing_table = []
-        self.routing_table[policy.name] = routing_table
 
         routing_data = self.routing_data[policy.name]
 
@@ -318,6 +320,8 @@ class DMPR(object):
                     'next-hop': next_hop_ip,
                     'interface': path.next_hop_interface,
                 })
+
+        self.routing_table[policy.name] = routing_table
 
     def _parse_msg_db(self, policy: AbstractPolicy) -> tuple:
         """
@@ -379,8 +383,11 @@ class DMPR(object):
                     next_hop=neighbor,
                     next_hop_interface=interface_name)
 
+
         path.append(self.id, interface_name,
                     interface['link-attributes'])
+
+        path.apply_attributes(LinkAttributes())
         return path
 
     @staticmethod
@@ -497,7 +504,7 @@ in current | in retracted | msg retracted |
 
         for interface in self.msg_db:
             for neighbor, msg in self.msg_db[interface].items():
-                if msg.rx_time + hold_time < now:
+                if (int(msg.rx_time) + int(hold_time)) < int(now):
                     obsolete.append((interface, neighbor))
 
         if obsolete:
@@ -530,7 +537,7 @@ in current | in retracted | msg retracted |
 
         obsolete = []
         for network, current in self.networks['current'].items():
-            if current + hold_time < now:
+            if (int(current) + int(hold_time)) < now:
                 obsolete.append(network)
 
         if obsolete:
@@ -833,6 +840,7 @@ in current | in retracted | msg retracted |
              ]
              }
         """
+        # print("->>>>>>>>>>>>> {}".format(self.routing_table))
         self._routing_table_update_func(self.routing_table)
 
     ###########

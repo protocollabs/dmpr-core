@@ -125,3 +125,5 @@ class Path(object):
                 return False
 
         return True
+
+    __repr__ = __str__
