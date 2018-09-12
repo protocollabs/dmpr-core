@@ -131,6 +131,10 @@ class DMPR(object):
         """
         self._conf = DefaultConfiguration.validate_config(configuration)
 
+        # prepare structure for saving specific attributes for the neighbors
+        for interface in self._conf['interfaces']:
+            self._conf['interfaces'][interface]['neighbor-attributes'] = {}
+
         self.trace('config.new', self._conf)
 
         self.id = self._conf['id']
@@ -160,6 +164,20 @@ class DMPR(object):
         """
         self._packet_tx_func = func
 
+    def handle_dynamic_update(self, json_data):
+        """
+        method for handling the dynamic update.
+        The inforamtion is provided by the REST-api as json String
+        :param json_data: JSON formattet string containing the data from api
+        :return: ---
+        """
+        for destination in json_data['destinations']:
+            dest_attr = {'bandwidth': destination['max_datarate_tx']}
+            for interface in self.msg_db: # todo interface from api?
+                for neighbor, msg in self.msg_db[interface].items():
+                    if destination['ipv4-address'] == msg.addr_v4:
+                        self._conf['interfaces'][interface]['neighbor-attributes'][neighbor] = dest_attr
+
     ##################
     #  dmpr rx path  #
     ##################
@@ -170,7 +188,7 @@ class DMPR(object):
         database and trigger all recalculations
         """
 
-        # print("RX from {} msg {}\n".format(interface_name, msg))
+        print("RX from {} msg {}\n".format(interface_name, msg))
 
         self.trace('rx.msg', msg)
 
@@ -383,11 +401,27 @@ class DMPR(object):
                     next_hop=neighbor,
                     next_hop_interface=interface_name)
 
+        attributes = LinkAttributes()
 
-        path.append(self.id, interface_name,
-                    interface['link-attributes'])
+        # check if specific attributes for neighbor are saved
+        # if specific attributes found, use them
+        # otherwise use the default attributes for the link
+        if neighbor in interface['neighbor-attributes']:
+            if 'bandwidth' in interface['neighbor-attributes'][neighbor]:
+                attributes['bandwidth'] = interface['neighbor-attributes'][neighbor]['bandwidth']
+            else:
+                attributes['bandwidth'] = interface['link-attributes']['bandwidth']
 
-        path.apply_attributes(LinkAttributes())
+            if 'loss' in interface['neighbor-attributes'][neighbor]:
+                attributes['loss'] = interface['neighbor-attributes'][neighbor]['loss']
+            else:
+                attributes['loss'] = interface['link-attributes']['loss']
+        else:
+            attributes = interface['link-attributes']
+
+        path.apply_attributes(attributes)
+        path.append(self.id, interface_name, attributes)
+
         return path
 
     @staticmethod
@@ -840,7 +874,7 @@ in current | in retracted | msg retracted |
              ]
              }
         """
-        # print("->>>>>>>>>>>>> {}".format(self.routing_table))
+        print("->>>>>>>>>>>>> {}".format(self.routing_table))
         self._routing_table_update_func(self.routing_table)
 
     ###########
