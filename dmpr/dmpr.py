@@ -171,12 +171,13 @@ class DMPR(object):
         :param json_data: JSON formattet string containing the data from api
         :return: ---
         """
+        interface = json_data['peer']['interface']
         for destination in json_data['destinations']:
             dest_attr = {'bandwidth': destination['max_datarate_tx']}
-            for interface in self.msg_db: # todo interface from api?
-                for neighbor, msg in self.msg_db[interface].items():
-                    if destination['ipv4-address'] == msg.addr_v4:
-                        self._conf['interfaces'][interface]['neighbor-attributes'][neighbor] = dest_attr
+            for neighbor, msg in self.msg_db[interface].items():
+                if destination['ipv4-address'] == msg.addr_v4:
+                    self._conf['interfaces'][interface]['neighbor-attributes'][neighbor] = dest_attr
+                    self.state.update_required = True
 
     ##################
     #  dmpr rx path  #
@@ -874,7 +875,7 @@ in current | in retracted | msg retracted |
              ]
              }
         """
-        print("->>>>>>>>>>>>> {}".format(self.routing_table))
+        # print("->>>>>>>>>>>>> {}".format(self.routing_table))
         self._routing_table_update_func(self.routing_table)
 
     ###########
