@@ -173,7 +173,9 @@ class DMPR(object):
         """
         interface = json_data['peer']['interface']
         for destination in json_data['destinations']:
-            dest_attr = {'bandwidth': destination['max_datarate_tx']}
+            dest_attr = {'bandwidth': destination['max_datarate_tx'],
+                         # TODO: NO, loss is NOT latency!!!
+                         'loss': destination['latency']}
             for neighbor, msg in self.msg_db[interface].items():
                 if destination['ipv4-address'] == msg.addr_v4:
                     self._conf['interfaces'][interface]['neighbor-attributes'][neighbor] = dest_attr
@@ -875,7 +877,7 @@ in current | in retracted | msg retracted |
              ]
              }
         """
-        # print("->>>>>>>>>>>>> {}".format(self.routing_table))
+        print("->>>>>>>>>>>>> {}".format(self.routing_table))
         self._routing_table_update_func(self.routing_table)
 
     ###########
