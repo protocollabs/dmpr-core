@@ -133,7 +133,7 @@ class DMPR(object):
 
         # prepare structure for saving specific attributes for the neighbors
         for interface in self._conf['interfaces']:
-            self._conf['interfaces'][interface]['neighbor-attributes'] = {}
+            self._conf['interfaces'][interface]['neighbor-attributes'] = {'unknown': {}}
 
         self.trace('config.new', self._conf)
 
@@ -173,6 +173,7 @@ class DMPR(object):
         """
         interface = json_data['peer']['interface']
         for destination in json_data['destinations']:
+            neighbor_known = False
             dest_attr = {'bandwidth': destination['max_datarate_tx'],
                          # TODO: NO, loss is NOT latency!!!
                          'loss': destination['latency']}
@@ -180,6 +181,11 @@ class DMPR(object):
                 if destination['ipv4-address'] == msg.addr_v4:
                     self._conf['interfaces'][interface]['neighbor-attributes'][neighbor] = dest_attr
                     self.state.update_required = True
+                    neighbor_known = True
+
+            if not neighbor_known:
+                self._conf['interfaces'][interface]['neighbor-attributes']['unknown']['{}'.format(
+                    destination['ipv4-address'])] = dest_attr
 
     ##################
     #  dmpr rx path  #
@@ -210,6 +216,10 @@ class DMPR(object):
                 message = Message(msg, interface, self.id, self.now())
                 self.msg_db[interface_name][msg['id']] = message
                 self.state.update_required = True
+                # check if already attributes known
+                if message.addr_v4 in interface['neighbor-attributes']['unknown']:
+                    interface['neighbor-attributes'][msg['id']] = interface['neighbor-attributes'][
+                        'unknown'][message.addr_v4]
             else:
                 message = self.msg_db[interface_name][msg['id']]
                 self.state.update_required |= message.apply_new_msg(msg,
