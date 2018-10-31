@@ -48,6 +48,8 @@ class DMPRState(object):
         self.full_only_mode = False
 
 
+
+
 class DMPR(object):
     """
     The core class. Before starting the core, you must register a configuration
@@ -168,7 +170,7 @@ class DMPR(object):
         """
         method for handling the dynamic update.
         The inforamtion is provided by the REST-api as json String
-        :param json_data: JSON formattet string containing the data from api
+        :param json_data: JSON formatted string containing the data from api
         :return: ---
         """
         interface = json_data['peer']['interface']
@@ -186,6 +188,18 @@ class DMPR(object):
             if not neighbor_known:
                 self._conf['interfaces'][interface]['neighbor-attributes']['unknown']['{}'.format(
                     destination['ipv4-address'])] = dest_attr
+
+        # TODO: this was never tested
+        for event in json_data['events']:
+            if event['event-type'] == 'dest-down':
+                to_remove = []
+                for neighbor, msg in self.msg_db[interface].items():
+                    if msg.addr_v4 == event['ipv4-addr']:
+                        to_remove.append(neighbor)
+                for rem_neighbor in to_remove:
+                    del self.msg_db[interface][rem_neighbor]
+
+
 
     ##################
     #  dmpr rx path  #
