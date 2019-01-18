@@ -15,6 +15,12 @@ from .policies import AbstractPolicy
 
 logger = logging.getLogger(__name__)
 
+mylog = logging.getLogger("mylog")
+fh = logging.FileHandler('/var/logs/tmp/myLog.txt')
+formatter = logging.Formatter('{"time": "%(asctime)s", "log": %(message)s}')
+fh.setFormatter(formatter)
+mylog.addHandler(fh)
+
 FULL_MODE_ANALYSE_HISTORY = 10
 FULL_MODE_TRIGGER_THRESH = 100
 FULL_MODE_TIME = 1000
@@ -47,6 +53,8 @@ class DMPRState(object):
             maxlen=FULL_MODE_ANALYSE_HISTORY)
         self.full_only_mode = False
 
+        self.last_interval_adaption = 0
+
 
 
 
@@ -68,6 +76,7 @@ class DMPR(object):
         self.id = None
         self._get_time = self._dummy_cb
         self._routing_table_update_func = self._dummy_cb
+        self._dyn_tx_interval = 0
         self._packet_tx_func = self._dummy_cb
 
         self.policies = []
@@ -182,14 +191,12 @@ class DMPR(object):
             for neighbor, msg in self.msg_db[interface].items():
                 if destination['ipv4-address'] == msg.addr_v4:
                     self._conf['interfaces'][interface]['neighbor-attributes'][neighbor] = dest_attr
-                    self.state.update_required = True
                     neighbor_known = True
 
             if not neighbor_known:
                 self._conf['interfaces'][interface]['neighbor-attributes']['unknown']['{}'.format(
                     destination['ipv4-address'])] = dest_attr
 
-        # TODO: this was never tested
         for event in json_data['events']:
             if event['event-type'] == 'dest-down':
                 to_remove = []
@@ -198,6 +205,15 @@ class DMPR(object):
                         to_remove.append(neighbor)
                 for rem_neighbor in to_remove:
                     del self.msg_db[interface][rem_neighbor]
+            if event['event-type'] == 'dest-up':
+                if self.now() - self.state.last_interval_adaption > 15:
+                    # avoid too much traffic
+                    self.state.last_interval_adaption = self.now()
+                    self.state.next_tx_time = self.now()
+                    logmsg = dict()
+                    logmsg['event'] = 'update-interval'
+                    logmsg['msg'] = self.id
+                    mylog.error(logmsg)
 
 
 
@@ -211,8 +227,7 @@ class DMPR(object):
         database and trigger all recalculations
         """
 
-        print("RX from {} msg {}\n".format(interface_name, msg))
-
+        # print("rx {}".format(msg['id']))
         self.trace('rx.msg', msg)
 
         if interface_name not in self._conf['interfaces']:
@@ -629,9 +644,14 @@ in current | in retracted | msg retracted |
         """
         Generate a new routing packet and call the msg_tx_cb callback
         """
+
         self._inc_seq_no()
         for interface in self._conf['interfaces']:
             msg = self._create_routing_msg(interface)
+            logmsg = dict()
+            logmsg['event'] = 'tx-packet'
+            logmsg['msg'] = msg
+            mylog.error(logmsg)
             self.trace('tx.msg', msg)
 
             for v in (4, 6):
@@ -876,8 +896,11 @@ in current | in retracted | msg retracted |
             interval = 0
 
         jitter = int(self._conf["rtn-msg-interval-jitter"])
-        wait_time = interval + random.random() * jitter
+
         now = self.now()
+
+        wait_time = interval + random.random() * jitter
+
         self.state.next_tx_time = now + wait_time
         self.log.debug("schedule next transmission for {} seconds".format(
             self.state.next_tx_time))
@@ -901,7 +924,17 @@ in current | in retracted | msg retracted |
              ]
              }
         """
-        print("->>>>>>>>>>>>> {}".format(self.routing_table))
+        # print("->>>>>>>>>>>>> {}".format(self.routing_table))
+        direct_neighbors = []
+        for entry in self.routing_table['lowest-loss']:
+            if entry['next-hop'] not in direct_neighbors:
+                direct_neighbors.append(entry['next-hop'])
+
+        msg = {'event': 'new-table',
+               'id': self.id,
+               'msg': self.routing_table,
+               'num-hosts': len(direct_neighbors)}
+        mylog.error(msg)
         self._routing_table_update_func(self.routing_table)
 
     ###########
