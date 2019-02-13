@@ -186,12 +186,12 @@ class DMPR(object):
         for destination in json_data['destinations']:
             neighbor_known = False
             dest_attr = {'bandwidth': destination['max_datarate_tx'],
-                         # TODO: NO, loss is NOT latency!!!
-                         'loss': destination['latency']}
+                         'loss': destination['loss']}
             for neighbor, msg in self.msg_db[interface].items():
                 if destination['ipv4-address'] == msg.addr_v4:
                     self._conf['interfaces'][interface]['neighbor-attributes'][neighbor] = dest_attr
                     neighbor_known = True
+                    self.state.update_required = True
 
             if not neighbor_known:
                 self._conf['interfaces'][interface]['neighbor-attributes']['unknown']['{}'.format(
@@ -203,8 +203,11 @@ class DMPR(object):
                 for neighbor, msg in self.msg_db[interface].items():
                     if msg.addr_v4 == event['ipv4-addr']:
                         to_remove.append(neighbor)
+
                 for rem_neighbor in to_remove:
                     del self.msg_db[interface][rem_neighbor]
+
+                self.state.update_required = True
             if event['event-type'] == 'dest-up':
                 if self.now() - self.state.last_interval_adaption > 15:
                     # avoid too much traffic
@@ -214,8 +217,6 @@ class DMPR(object):
                     logmsg['event'] = 'update-interval'
                     logmsg['msg'] = self.id
                     mylog.error(logmsg)
-
-
 
     ##################
     #  dmpr rx path  #
@@ -227,7 +228,7 @@ class DMPR(object):
         database and trigger all recalculations
         """
 
-        # print("rx {}".format(msg['id']))
+        print("rx {}".format(msg['id']))
         self.trace('rx.msg', msg)
 
         if interface_name not in self._conf['interfaces']:
@@ -924,7 +925,7 @@ in current | in retracted | msg retracted |
              ]
              }
         """
-        # print("->>>>>>>>>>>>> {}".format(self.routing_table))
+        #print("->>>>>>>>>>>>> {}".format(self.routing_table))
         direct_neighbors = []
         for entry in self.routing_table['lowest-loss']:
             if entry['next-hop'] not in direct_neighbors:
@@ -935,6 +936,7 @@ in current | in retracted | msg retracted |
                'msg': self.routing_table,
                'num-hosts': len(direct_neighbors)}
         mylog.error(msg)
+        print("->>> neighbors: {}".format(len(direct_neighbors)))
         self._routing_table_update_func(self.routing_table)
 
     ###########
