@@ -209,6 +209,8 @@ class DMPR(object):
 
                 self.state.update_required = True
             if event['event-type'] == 'dest-up':
+                # destination up leads to a proactive transmission of routing
+                # messages
                 if self.now() - self.state.last_interval_adaption > 15:
                     # avoid too much traffic
                     self.state.last_interval_adaption = self.now()
@@ -449,7 +451,8 @@ class DMPR(object):
         # check if specific attributes for neighbor are saved
         # if specific attributes found, use them
         # otherwise use the default attributes for the link
-        if neighbor in interface['neighbor-attributes']:
+        # dynamic update has to be enabled in config
+        if (neighbor in interface['neighbor-attributes']) and (self._conf['dynamic-update-enabled']):
             if 'bandwidth' in interface['neighbor-attributes'][neighbor]:
                 attributes['bandwidth'] = interface['neighbor-attributes'][neighbor]['bandwidth']
             else:
@@ -925,18 +928,19 @@ in current | in retracted | msg retracted |
              ]
              }
         """
-        #print("->>>>>>>>>>>>> {}".format(self.routing_table))
         direct_neighbors = []
+        networks = []
         for entry in self.routing_table['lowest-loss']:
             if entry['next-hop'] not in direct_neighbors:
                 direct_neighbors.append(entry['next-hop'])
+            if entry['prefix'] not in networks:
+                networks.append(entry['prefix'])
 
         msg = {'event': 'new-table',
                'id': self.id,
                'msg': self.routing_table,
                'num-hosts': len(direct_neighbors)}
         mylog.error(msg)
-        print("->>> neighbors: {}".format(len(direct_neighbors)))
         self._routing_table_update_func(self.routing_table)
 
     ###########
