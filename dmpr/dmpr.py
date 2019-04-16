@@ -15,12 +15,6 @@ from .policies import AbstractPolicy
 
 logger = logging.getLogger(__name__)
 
-mylog = logging.getLogger("mylog")
-fh = logging.FileHandler('/var/logs/tmp/myLog.txt')
-formatter = logging.Formatter('{"time": "%(asctime)s", "log": %(message)s}')
-fh.setFormatter(formatter)
-mylog.addHandler(fh)
-
 FULL_MODE_ANALYSE_HISTORY = 10
 FULL_MODE_TRIGGER_THRESH = 100
 FULL_MODE_TIME = 1000
@@ -218,7 +212,6 @@ class DMPR(object):
                     logmsg = dict()
                     logmsg['event'] = 'update-interval'
                     logmsg['msg'] = self.id
-                    mylog.error(logmsg)
 
     ##################
     #  dmpr rx path  #
@@ -229,8 +222,6 @@ class DMPR(object):
         receive routing packet, save it in the message
         database and trigger all recalculations
         """
-
-        print("rx {}".format(msg['id']))
         self.trace('rx.msg', msg)
 
         if interface_name not in self._conf['interfaces']:
@@ -655,7 +646,6 @@ in current | in retracted | msg retracted |
             logmsg = dict()
             logmsg['event'] = 'tx-packet'
             logmsg['msg'] = msg
-            mylog.error(logmsg)
             self.trace('tx.msg', msg)
 
             for v in (4, 6):
@@ -940,7 +930,6 @@ in current | in retracted | msg retracted |
                'id': self.id,
                'msg': self.routing_table,
                'num-hosts': len(direct_neighbors)}
-        mylog.error(msg)
         self._routing_table_update_func(self.routing_table)
 
     ###########
