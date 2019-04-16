@@ -186,10 +186,19 @@ class DMPR(object):
                     self._conf['interfaces'][interface]['neighbor-attributes'][neighbor] = dest_attr
                     neighbor_known = True
                     self.state.update_required = True
+                if 'ipv6-address' in destination: # REST api provides IPv6 information
+                    if destination['ipv6-address'] == msg.addr_v6:
+                        self._conf['interfaces'][interface]['neighbor-attributes'][neighbor] = dest_attr
+                        neighbor_known = True
+                        self.state.update_required = True
 
             if not neighbor_known:
                 self._conf['interfaces'][interface]['neighbor-attributes']['unknown']['{}'.format(
                     destination['ipv4-address'])] = dest_attr
+                if 'ipv6-address' in destination: # REST api provides IPv6 information
+                    self._conf['interfaces'][interface]['neighbor-attributes']['unknown']['{}'.format(
+                        destination['ipv6-address'])] = dest_attr
+
 
         for event in json_data['events']:
             if event['event-type'] == 'dest-down':
@@ -197,6 +206,9 @@ class DMPR(object):
                 for neighbor, msg in self.msg_db[interface].items():
                     if msg.addr_v4 == event['ipv4-addr']:
                         to_remove.append(neighbor)
+                    else if 'ipv6-addr' in event:
+                        if msg.addr_v6 == event['ipv6-addr']:
+                            to_remove.append(neighbor)
 
                 for rem_neighbor in to_remove:
                     del self.msg_db[interface][rem_neighbor]
@@ -243,6 +255,10 @@ class DMPR(object):
                 if message.addr_v4 in interface['neighbor-attributes']['unknown']:
                     interface['neighbor-attributes'][msg['id']] = interface['neighbor-attributes'][
                         'unknown'][message.addr_v4]
+                else if message.addr_v6 in interface['neighbor-attributes']['unknown']:
+                    interface['neighbor-attributes'][msg['id']] = interface['neighbor-attributes'][
+                            'unknown'][message.addr_v6]
+
             else:
                 message = self.msg_db[interface_name][msg['id']]
                 self.state.update_required |= message.apply_new_msg(msg,
