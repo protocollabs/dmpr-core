@@ -206,7 +206,7 @@ class DMPR(object):
                 for neighbor, msg in self.msg_db[interface].items():
                     if msg.addr_v4 == event['ipv4-addr']:
                         to_remove.append(neighbor)
-                    else if 'ipv6-addr' in event:
+                    elif 'ipv6-addr' in event:
                         if msg.addr_v6 == event['ipv6-addr']:
                             to_remove.append(neighbor)
 
@@ -255,7 +255,7 @@ class DMPR(object):
                 if message.addr_v4 in interface['neighbor-attributes']['unknown']:
                     interface['neighbor-attributes'][msg['id']] = interface['neighbor-attributes'][
                         'unknown'][message.addr_v4]
-                else if message.addr_v6 in interface['neighbor-attributes']['unknown']:
+                elif message.addr_v6 in interface['neighbor-attributes']['unknown']:
                     interface['neighbor-attributes'][msg['id']] = interface['neighbor-attributes'][
                             'unknown'][message.addr_v6]
 
